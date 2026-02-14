@@ -1,0 +1,1057 @@
+---
+title: "Diagnostics Report: Bayesian Hierarchical Abudance Model"
+author: "Valentina La Morgia"
+date: last-modified
+format: 
+  html:
+    toc: true
+    code-fold: true
+    self-contained: true
+knitr:
+  opts_chunk: 
+    fig.width: 10   # Larghezza in pollici
+    fig.height: 7   # Altezza in pollici
+    fig.align: "center"
+    dpi: 300        # Alta risoluzione
+---
+
+
+```{r}
+#| label: packages
+#| message: false
+#| warning: false
+##---- Load required packages ----
+{
+  library(cmdstanr)
+  library(posterior)
+  library(bayesplot)
+  library(corrplot)
+  library(vegan)
+  library(sf)
+  library(patchwork)
+  library(tidybayes)
+  library(bayestestR)
+}
+```
+
+```{r}
+#| label: reconstruct-model
+#| message: false
+#| warning: false
+rm(list = ls())
+source("scripts/03_abundance_hierachical_STAN_data_prep.R")
+fit <- readRDS("outputs/fit_hierarchical.rds")
+```
+
+
+## 1. Convergence
+In this section, we verify that the model has correctly explored the parameter space.   
+Rhat must always be less than 1.01 and ESS > 400.
+In general, there are no divergences, we have no max treedepth, and the ebfmi value is good (it must not be < 0.2/0.3).
+
+```{r}
+#| label: summary-diagnostics
+
+fit$diagnostic_summary()
+fit$cmdstan_diagnose()
+
+####---- Convergence ----
+# Main diagnostics for the main parameters
+summary_diag <- fit$summary(c(
+  "psi_area",   # factor for areas
+  "alpha_p",    # detection
+  "beta",       # recruitment (births and immigration)
+  "phi",        # survival, derived from global parameter mu (mortality)
+  "N"           # abundance
+))
+print(summary_diag %>% select(variable, rhat, ess_bulk, ess_tail))
+print(paste0("Rhat is always smaller than: ", round(max(summary_diag$rhat),3)))
+print(paste0("ESS_bulk is always larger than: ", round(min(summary_diag$ess_bulk),0)))
+print(paste0("ESS_tail is always larger than: ", round(min(summary_diag$ess_tail),0)))
+
+# Diagnostic plot: Rhat vs ESS
+ggplot(summary_diag, aes(x = rhat, y = ess_bulk)) +
+  geom_point(alpha = 0.5, color = "darkblue") +
+  geom_vline(xintercept = 1.01, linetype = "dashed", color = "red") +
+  labs(title = "Diagnostica MCMC: Rhat vs ESS",
+       subtitle = "La linea rossa indica la soglia critica di Rhat (1.05)",
+       x = "Rhat (Convergenza)",
+       y = "Bulk ESS (Efficienza)") +
+  theme_minimal()
+```
+
+The validity of the MCMC sampling was confirmed by analyzing the values of $\hat{R}$ (Gelman-Rubin statistic), all of which were below the critical threshold of 1.01, indicating correct convergence of the chains. Furthermore, the Effective Sample Size (ESS) for the parameters of interest ($N$, $\phi$, $\beta$) exceeded the minimum recommended threshold, ensuring sufficient accuracy for the estimation of credibility intervals.
+
+The following graphs should show ‘intertwined caterpillars’.
+
+```{r}
+#| label: mcmc-trace
+#| fig-cap: "MCMC Diagnostics: Traceplots"
+# Trace plots to visualise convergence
+
+# for N, we select an area with low density (S1) and one with high density (R3), and for both we plot the first session and one in the middle
+mcmc_trace(fit$draws(c("N[1,1]", "N[1,20]", "N[6,1]", "N[6,20]")))
+mcmc_trace(fit$draws(c("phi")))
+mcmc_trace(fit$draws(c("alpha_p[1,1]", "alpha_p[1,11]", "alpha_p[1,22]",
+                     "alpha_p[6,1]", "alpha_p[6,11]", "alpha_p[6,22]")))
+mcmc_trace(fit$draws(c("alpha_p[1,1]", "alpha_p[1,2]", "alpha_p[1,3]")))
+mcmc_trace(fit$draws(c(
+  "beta[6,12]", # Area 6, ripresa Maggio 2023 (Post-Inverno)
+  "beta[6,19]", # Area 6, ripresa Giugno 2024 (Post-Inverno)
+  "beta[6,5]",  # Area 6, Luglio 2022 (Dati abbondanti)
+  "beta[6,15]",  # Area 6, Luglio 2022 (Dati abbondanti)
+  "beta[1,2]",  # Area 1, Maggio 2022 (No avvistamenti)
+  "beta[1,5]",  # Area 1, Luglio 2022 (Dati scarsi)
+  "beta[1,12]"  # Area 1, Maggio 2023 (Incertezza massima)
+)))
+```
+
+For the abundance parameter, we only plotted an area with low density (S1) and one with high density (R3), and for both we selected the first session and one in the middle/towards the end. Trace plots for the specific abundance parameters (e.g., N[1,1], N[6,20]) demonstrate good convergence and mixing. The y-axis scales reflect the varying densities between areas; for instance, the estimates for area 6 reach up to approximately 75 individuals, while area 1 estimates are significantly lower, staying below 12. Recall that for N, the caterpillars may appear slightly “wider” (more uncertainty) for areas with few captures (such as area S1 in this case). This is normal, as long as the chains overlap well.
+
+For alpha_p (detection), it is useful to check convergence at the three “extremes” of monitoring to ensure that the model is stable throughout the time frame. Again, we used areas S1 (1) and R3 (6) (different abundance), selecting an initial session (1), an intermediate session (11), and a final session (22).    
+Another critical point of the model is how it estimates detectability in sites with many zeros. Checking the trace plots of these intercepts is essential to see if the “borrowing strength” (information sharing) is working well or if the chains are wandering aimlessly.     
+The graphs for areas 1 and 6 (e.g., alpha_p[1,1], alpha_p[6,22]) show perfectly overlapping chains. This indicates that the model has reached a stable estimate of the probability of capture for different sessions and areas.
+With regard to the management of scarce data, the plots alpha_p[1,1], alpha_p[1,2], and alpha_p[1,3] are particularly interesting. These correspond to area S1 in the first sessions of 2022, where the tables indicate zero catches. Even in the total absence of direct observations in those years, the chains converge. This happens because the hierarchical model “borrows” information from other sites and years, stabilizing the estimate through global distribution.
+Regarding detectability variability, note how the mean values of the intercepts (on the y-axis) vary between sessions. For example, alpha_p[6,1] has a higher mean than alpha_p[6,11], correctly reflecting how the probability of capture changes over time depending on sampling conditions.
+
+Given the fragmented sampling schedule (with long winter breaks), the $\beta$ parameters (entry probability) are particularly interesting because they have to handle both “constant” recruitment during the summer and the massive entry of new individuals after winter. 
+We have therefore chosen the $\beta$ values that correspond to the first session after the winter break. Here, the model must estimate who “entered” during the 7 months of absence. $\beta[s, 12]$: Corresponds to May 15, 2023 (first entry after winter 2022). $\beta[s, 19]$: Corresponds to June 15, 2024 (first entry after winter 2023). The chains here must be well mixed, but we can expect higher values than the others.    
+Results for beta[6,12] and beta[6,19]: In these post-winter recovery sessions, the chains are well mixed and stationary. In particular, beta[6,19] shows oscillations covering almost the entire interval $[0, 1]$, indicating that the model recognizes a significant influx of new individuals, but with inherent uncertainty due to the long sampling break that preceded it.     
+We then chose a mid-summer session (July/August) in an area with a lot of data (e.g., R3). $\beta[6, 5]$ (Area 6, July 2022) or $\beta[6, 15]$ (Area 6, August 2023). Here we expect very thin and precise “caterpillars” because with a lot of capture data, the model should be very confident about when new individuals enter.     
+Results for beta[6.5] and beta[6.15]: These plots correspond to summer sessions (July 2022 and August 2023) in the R3 area. The chains are much “narrower” and concentrated towards low values (e.g., below 0.20 for beta[6,5]). This indicates that, with close sampling and more data, the model is very accurate in identifying that summer recruitment is constant but limited compared to spring peaks.      
+Finally, it is essential to show convergence in sites where we had many zeros. $\beta[1, 2]$ (Area 1, start of study) is useful to show how the model handles recruitment when it sees no one. The chains could be “wider” (greater uncertainty), but they must still overlap. This shows that the model does not “go crazy” in the absence of data, but correctly relies on the hierarchical structure.     
+Results for beta[1,2], beta[1,5], and beta[1,12]: These graphs refer to area S1, which had no catches in several occasions. These trace plots are very “thick” and cover almost the entire space from 0 to 1. This is correct behavior: in the absence of local data, the model expresses maximum uncertainty, while remaining stable thanks to information “borrowed” from the global mortality rate ($\mu$).
+
+Finally, the trace plots for phi (survival, derived from the global $\mu$ parameter, mortality) show generally high values (often between 0.90 and 0.96), indicating high apparent survival between sessions. Note how the intervals phi[11] and phi[18] show lower values and greater variance (ranging between 0.2 and 0.6). Since it is derived from a global parameter ($\mu$), the trace plots of phi should be, as in this case, very clean and stable. If they fluctuate greatly, on the other hand, it could mean that survival data is scarce in all areas.
+
+
+## 2. Prior-Posterior overlap
+
+To verify the overlap between priors and posteriors, we considered the global parameter mu, and for the probability of inclusion per area, detection, and betas, we compared a data-rich area (R3) and a data-poor area (S1).    
+The inclusion probability per area ($\psi_{area}$) determines how many of the increased individuals ($M$) are real. Having used a $\text{Beta}(1, 1)$ (a flat line between 0 and 1), any “hump” in the posterior indicates that the model has learned something about the population size.     
+The detection intercept ($\alpha_p$) is the most sensitive parameter in capture-recapture models. In the data-rich area, we expect minimal overlap (the data dominates). In the data-poor area, the posterior will look much more like the prior $\text{Normal}(0, 2)$, showing that the model is relying on the hierarchical structure and initial assumptions.     
+The entry probability ($\beta$) represents recruitment, which is why we have again chosen the $\beta$ values from the post-winter sessions (e.g., session 11 or 18). Here too, starting from a $\text{Beta}(1, 1)$, we expect the model to “shift” the probability towards values that better explain the appearance of new individuals.
+
+```{r}
+#| label: Prior-posterior-overlap-mu
+#| fig-cap: "Prior-Posterior overlap: global mortality"
+
+# pior samples (mu ~ half-normal(0,1))
+set.seed(123)
+n_samples <- 12000 # Total number of samples (3000 iterations * 4 chains)
+prior_mu <- abs(rnorm(n_samples, 0, 1))
+# extract the posterior
+post_mu <- as.vector(fit$draws("mu"))
+
+df_mu <- data.frame(
+  Value = c(prior_mu, post_mu),
+  Type = rep(c("Prior", "Posterior"), each = n_samples)
+)
+ggplot(df_mu, aes(x = Value, fill = Type)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Prior-Posterior Overlap: Global Mortality (mu)",
+       x = "Mortality", y = "Density") +
+  theme_minimal()
+```
+
+The comparison between the prior and posterior distributions for the global mortality rate (μ) shows minimal overlap: the reduction in variance in the posterior distribution compared to the prior distribution confirms that the experimental data were highly informative, allowing an accurate estimate of the parameter through the hierarchical structure of the model.
+
+
+```{r}
+#| label: Prior-posterior-overlap-psi_areas
+#| fig-cap: "Prior-Posterior overlap: inclusion probability (psi)"
+
+prior_psi <- rbeta(n_samples, 1, 1)
+post_psi_ricca <- as.vector(fit$draws("psi_area[6]"))
+post_psi_povera <- as.vector(fit$draws("psi_area[1]"))
+
+df_psi <- data.frame(
+  Value = c(prior_psi, post_psi_ricca, post_psi_povera),
+  Type = rep(c("Prior", "Post: R3 (data-rich)", "Post: S1 (data-poor)"), each = n_samples)
+)
+ggplot(df_psi, aes(x = Value, fill = Type)) +
+  geom_density(alpha = 0.4) +
+  labs(title = "Prior-Posterior Overlap: Inclusion probability (psi)",
+      #  subtitle = "Evidenzia come i dati locali riducono l'incertezza rispetto alla prior",
+       x = "logit(psi)", y = "Density") +
+  theme_minimal()
+
+```
+
+This graph confirms that the choice of data augmentation value (M) was correct: since none of the posterior distributions are "squashed" against the upper limit of 1, we have proof that the value of M did not artificially limit the estimate of the actual abundance. Furthermore, it graphically demonstrates borrowing strength: even in the data-poor site (S1), the model manages to define a plausible distribution thanks to the influence of the global hierarchical structure.
+
+```{r}
+#| label: Prior-posterior-overlap-alpha_p
+#| fig-cap: "Prior-Posterior overlap: global mortality"
+
+prior_alpha <- rnorm(n_samples, 0, 2)
+post_alpha_ricca <- as.vector(fit$draws("alpha_p[6,11]"))
+post_alpha_povera <- as.vector(fit$draws("alpha_p[1,11]"))
+
+df_alpha <- data.frame(
+  Value = c(prior_alpha, post_alpha_ricca, post_alpha_povera),
+  Type = rep(c("Prior", "Post: R3 (data-rich)", "Post: S1 (data-poor)"), each = n_samples)
+)
+ggplot(df_alpha, aes(x = Value, fill = Type)) +
+  geom_density(alpha = 0.4) +
+  labs(title = "Prior-Posterior Overlap: Detectability (alpha_p)",
+      #  subtitle = "Evidenzia come i dati locali riducono l'incertezza rispetto alla prior",
+       x = "logit(p)", y = "Density") +
+  theme_minimal()
+```
+
+This graphically demonstrates the concept of "borrowing strength". Where data is abundant (R3), the posterior deviates significantly from the prior. Where data is scarce (S1), the model remains more uncertain and "prudent", staying closer to the initial assumptions but still defining its own distribution thanks to the influence of global parameters.
+
+```{r}
+#| label: Prior-posterior-overlap-beta
+#| fig-cap: "Prior-Posterior overlap: recruitment (beta)"
+
+prior_beta <- rbeta(n_samples, 1, 1)
+post_beta_ricca <- as.vector(fit$draws("beta[6,11]"))
+post_beta_povera <- as.vector(fit$draws("beta[1,11]"))
+
+df_beta <- data.frame(
+  Value = c(prior_beta, post_beta_ricca, post_beta_povera),
+  Type = rep(c("Prior", "Post: R3 (data-rich)", "Post: S1 (data-poor)"), each = n_samples)
+)
+ggplot(df_beta, aes(x = Value, fill = Type)) +
+  geom_density(alpha = 0.4) +
+  labs(title = "Prior-Posterior Overlap: Recruitment (beta)",
+      #  subtitle = "Evidenzia come i dati locali riducono l'incertezza rispetto alla prior",
+       x = "beta", y = "Density") +
+  theme_minimal()
+```
+
+This graph validates the hierarchical structure of the model. It confirms that the global mortality rate is not influenced by your initial choices (the priors), but is driven almost exclusively by the biological evidence that emerged from the six areas of study.
+
+### 2.1. Prior-Posterior Overlap for N
+
+For the parameter $N$ (Abundance), the Prior-Posterior Overlap (PPO) check has a different meaning and, in some ways, is less “canonical” than structural parameters such as $\mu$ or $\alpha_p$. In our model, $N$ is not a parameter to which we directly assign a prior (as we do with $\mu \sim \text{Normal}(0,1)$). $N$ is calculated in the generated quantities block as the sum of the individual probabilities of being alive. The “prior” of $N$ is implicit: the prior distribution of $N$ depends on the combination of the priors of $\psi$ (inclusion), $\beta$ (entry), and $\phi$ (survival). This “prior” of $N$ is bounded above by the value $M$ (data augmentation) chosen in the R code ($M = n \times 3$). However, it may make sense to perform a PPO check to demonstrate that the value $M$ chosen for augmentation is sufficient. If the posterior of $N$ is very close to $M$, it means that the prior is cutting off reality and it is necessary to increase $M$.
+
+
+```{r}
+#| label: Prior-posterior-overlap-N
+#| fig-cap: "Prior-Posterior overlap: Abundance (N)"
+
+post_N <- as.vector(fit$draws("N[6,11]"))
+# Definition of the prior (simplified)
+# if psi and beta are uniform, N follows a distribution related to M
+prior_N <- runif(length(post_N), 0,
+  stan_data$M_total /   stan_data$N_areas) 
+
+df_N <- data.frame(
+  Value = c(prior_N, post_N),
+  Type = rep(c("Prior (Implicita/M)", "Posterior"), each = length(post_N))
+)
+ggplot(df_N, aes(x = Value, fill = Type)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Overlap for Abundance (N)",
+      #  subtitle = "Dimostra quanto i dati hanno ristretto la stima rispetto al limite M",
+       x = "Number of individuals (N)", y = "Density") +
+  theme_minimal()
+```
+
+The overlap check for the abundance parameter (N) confirms the robustness of the data augmentation strategy. The posterior distribution is concentrated in a much narrower range of values than the implicit prior, with a tail that ends well before the maximum limit M. This shows that the monitoring provided sufficiently informative data to allow the model to converge on a population estimate that is not influenced by the numerical constraints of the augmented dataset.
+
+### 2.2. Prior-Posterior Overlap for Survival (phi)
+
+Survival in our model is a transformed parameter that depends on two elements: the overall mortality rate $\mu$ and the time interval $\Delta$ (delta). Calculating the PPO for $\phi$ is still useful: while $\mu$ is an instantaneous rate that is difficult to visualize, $\phi$ is an intuitive probability (0-1). Showing the overlap for $\phi$ allows us to see how the “prior” on $\mu$ translates into a “prior” on the actual survival of the animals. Furthermore, since we have very different intervals $\Delta$ (15 days vs. 7 months), the “prior” of $\phi$ changes for each session. Showing the PPO for a short and a long interval should demonstrate that the model understands that the probability of surviving one winter is different from that of surviving two weeks.
+
+```{r}
+#| label: Prior-posterior-overlap-survival
+#| fig-cap: "Prior-Posterior overlap: Survival (phi)"
+
+# temporal intervals
+# delta[1] ~15 gg, delta[11] winter (~210 gg)
+d_breve <- 15 
+d_lungo <- 210
+
+# generate phi prior transforming the mu prior ~ HalfNormal(0,1)
+prior_mu <- abs(rnorm(n_samples, 0, 1))
+prior_phi_breve <- exp(-prior_mu * (d_breve/30.44)) # normalised on a monthly basis (cf. intervals)
+prior_phi_lungo <- exp(-prior_mu * (d_lungo/30.44))
+post_phi_breve <- as.vector(fit$draws("phi[1]"))
+post_phi_lungo <- as.vector(fit$draws("phi[11]"))
+
+df_phi_short <- data.frame(
+  Value = c(prior_phi_breve, post_phi_breve),
+  Type = rep(c("Prior", "Posterior"), each = length(post_N))
+)
+ggplot(df_phi_short, aes(x = Value, fill = Type)) +
+  geom_density(alpha = 0.5) +
+  labs(#title = "Overlap for Survival (phi) - short interval",
+       subtitle = "Short interval (~ 15 days)",
+       x = "Survival (N)", y = "Density") +
+  theme_minimal() -> df_phi_short
+
+df_phi_long <- data.frame(
+  Value = c(prior_phi_lungo, post_phi_lungo),
+  Type = rep(c("Prior", "Posterior"), each = length(post_N))
+)
+ggplot(df_phi_long, aes(x = Value, fill = Type)) +
+  geom_density(alpha = 0.5) +
+  labs(#title = "Overlap for Survival (phi) - long interval",
+       subtitle = "Long interval (~ 7 months, winter)",
+       x = "Survival (N)", y = "Density") +
+  theme_minimal() -> df_phi_long
+
+df_phi_short + df_phi_long +
+  plot_layout(guides = "collect") + 
+  plot_annotation(title = "Prior-Posterior Overlap for Survival (phi)")
+```
+
+The comparison of overlap checks for apparent survival (ϕ) between short and long intervals highlights the model's ability to adapt to the temporal structure of the data. While survival is estimated with extreme precision close to unity in 15-day intervals, the model correctly captures the decrease in survival probability in inter-annual intervals. The clear distinction between the posterior distributions in the two scenarios confirms that the monthly mortality rate μ has been estimated robustly, allowing for consistent demographic projections on both a biweekly and seasonal scale.
+
+## 3. Correlation between parameters
+
+In a capture-recapture model, parameters are almost never independent. Seeing how they relate to each other helps to understand whether the model is well specified or whether there are identifiability issues.
+
+The correlation between abundance and detectability is the most important one. It is often negative: if the model estimates low detectability, it must compensate by estimating more individuals to explain the observed data (and vice versa).    
+If the correlation is extreme (e.g. >0.9), it means that the model struggles to distinguish whether there are a few highly visible animals or many nearly invisible animals. If the correlation is moderate, the model is robust.
+
+Between Survival (ϕ) and Recruitment (β), we expect a trade-off.
+This correlation helps to understand population dynamics. If an area has high survival but low recruitment, the population is stable but "old". Seeing whether these parameters are correlated in the estimates tells us whether the model correctly separates those who remain (survivors) from those who enter (newcomers).
+
+The correlation between global parameters (e.g. μ) and local parameters allows to see how much the estimates for individual sites depend on the global parameter. It is visual proof of the "borrowing strength" of the hierarchical model.
+
+```{r}
+#| label: correlation-abundance-detection
+#| fig-cap: "Correlation of abundance and detectability"
+params_check <- c("mu",
+  "psi_area[6]",
+  "N[6,11]",
+  "alpha_p[6,11]",
+  "beta[6,12]")
+mcmc_pairs(fit$draws(params_check), off_diag_fun = "hex")
+```
+
+The analysis of correlations between parameters (Pairs Plot) confirms the identifiability of the model. With the exception of the intrinsic and expected correlation between the probability of inclusion (ψ) and abundance (N), the other key parameters, in particular the overall mortality rate (μ) and detectability ($\alpha_{p}$), show substantial independence. The absence of 'banana' or funnel shapes in the joint distributions ensures that the MCMC sampler has correctly explored the parameter space without incurring numerical trade-offs that could have affected the accuracy of the demographic estimates.
+
+## 4. Shrinkage and overconfidence
+
+Shrinkage is the phenomenon whereby estimates for individual sites are "pulled" towards the global mean.
+It demonstrates the usefulness of the hierarchical model. At sites with very little data (such as S1), the abundance estimate does not "explode" towards absurd values, but is stabilised by the behaviour of the other sites.     
+With high shrinkage, in data-poor sites, the posterior will be very close to the global mean. This is good: it means that the model is compensating for the lack of local data.     
+With low shrinkage, in data-rich sites (such as R3), the estimate remains closer to the raw data. This indicates that the local data is strong enough to 'win' against the pressure of the global mean.
+
+Overconfidence occurs when the model produces credibility intervals that are too narrow and do not reflect the actual variability of the data, often due to an overly rigid hierarchical structure or overly informative priors.     
+Chechking for overconfidence protects us from accusations of having 'forced' the results. If the model claims pinpoint accuracy at a site where you have only captured two animals, you are in a situation of overconfidence.
+
+In our case, we are interested in how N is affected by the hierarchical model. However, this effect is due to the combined effect on alpha_p and psi. So, we eveluate the shrinkage on these two parameters.
+
+Detectability is the parameter where shrinkage is most evident. Without the hierarchical model, a site with very few captures would give an estimate of detectability that is extreme or very unstable.    
+We compare the average estimate of alpha_p for each area relative to the global mean (the hyperparameter of the model). Areas with less data (such as S1) should have an alpha_p that 'leans' towards the global mean more than they would if estimated on their own, because we are assuming that the species has similar detectability at all sites, unless the local data are strong enough to prove otherwise.
+
+```{r}
+#| label: shrinkage-detectability
+#| fig-cap: "Shrinkage: Detectability (p)"
+
+# avarage p across all areas
+mean_alpha_all <- fit$summary("alpha_p") %>% 
+  pull(mean) %>% 
+  mean()
+# avarage psi across all areas
+mean_psi_all <- fit$summary("psi_area") %>% 
+  pull(mean) %>% 
+  mean()
+
+alpha_data <- fit$summary("alpha_p") %>%
+  mutate(Area = rep(1:6, each = 23)) %>% # 23 is the number of sessions
+  group_by(Area) %>%
+  summarise(Media_Area = mean(mean), 
+            Incertezza_inf = mean(q5), 
+            Incertezza_sup = mean(q95))
+ggplot(alpha_data, aes(x = factor(Area), y = Media_Area)) +
+  geom_hline(yintercept = mean_alpha_all, linetype = "dashed", color = "darkgrey") +
+  geom_errorbar(aes(ymin = Incertezza_inf, ymax = Incertezza_sup), width = 0.2, color = "royalblue") +
+  geom_point(size = 3, color = "royalblue") +
+  labs(title = "Shrinkage: Detectability (p)",
+       subtitle = "The dashed line is the mean detectability across all sites",
+       x = "Study area", y = "Estimated value (logit scale)") +
+  theme_minimal()
+```
+
+The graph is visual proof that the hierarchical model works. The dots (the area averages) all gravitate around the dotted line (the average of all sites). Even Area 1 and Area 6, despite their differences in density, have comparable detectability estimates.
+
+On the other hand, psi determines the size of the actual 'super-population'. It is the parameter that most directly influences N.
+Shrinkage on the probability of inclusion acts as a density regulariser. It prevents the estimated population in a "poor" area from being too different from the average of other areas, unless there is a solid statistical reason. It shows that the model is not just counting animals, but estimating a probability distribution consistent across all sites.
+
+
+```{r}
+#| label: shrinkage-inclusion
+#| fig-cap: "Shrinkage: Inclusion probability (psi)"
+
+mean_psi_all <- fit$summary("psi_area") %>% 
+  pull(mean) %>% 
+  mean()
+psi_data <- fit$summary("psi_area") %>%
+  mutate(Area = factor(1:6)) %>% 
+  select(Area, mean, q5, q95)
+ggplot(psi_data, aes(x = Area, y = mean)) +
+  geom_hline(yintercept = mean_psi_all, linetype = "dashed", color = "darkgrey", size = 0.8) +
+  geom_errorbar(aes(ymin = q5, ymax = q95), width = 0.2, color = "seagreen", size = 1) +
+  geom_point(size = 4, color = "seagreen") +
+  scale_y_continuous(limits = c(0, 1)) + # psi è una probabilità 0-1
+  labs(title = "Shrinkage: Inclusion probability (psi)",
+       subtitle = "The dashed line is the mean inclusione probability across all sites",
+       x = "Study area", y = "Probability (psi)") +
+  theme_minimal()
+```
+
+In this graph, the difference in uncertainty between the areas is also clearly visible, confirming that the model does not suffer from overconfidence.    
+The error bars for Areas 1 and 2 are significantly wider than those for Area 3 or Area 6. This is because ψ is directly proportional to the number of unique individuals captured: the fewer individuals you have observed in an area, the more uncertain the model is about the actual size of the population at that site.    
+Concerning shrinkage behaviour, the points in Areas 1 and 2 are 'pulled' upwards (towards the grey dotted line) compared to what a simple raw count would do. The model is saying, 'I saw few animals in these areas, but since the density is higher in the other sites, it is likely that there are more individuals here than I was able to capture'.
+Area 6 (Data-rich) is the only area that stands out clearly above the global average with reduced uncertainty. Here, the data is so strong that it 'overcomes' the force of gravity of shrinkage.
+
+Finally, we check for the overall effect on N, by comparing the model estimate with the observed number individuals for a sample session (session 5).
+
+```{r}
+#| label: shrinkage-N
+#| fig-cap: "Shrinkage: Abundance (N)"
+
+k = 5
+n_observed <- sapply(1:6, function(a) {
+  # individuals captured during the session per area
+  sum(stan_data$y[stan_data$area == a, k] > 0)
+})
+print(n_observed)
+# model estimate
+n_stats_k <- fit$summary("N") %>%
+  filter(grepl(paste0(",", k, "]"), variable)) %>%
+  mutate(Area = factor(1:6), Observed = n_observed)
+mean_N_sessione <- mean(n_stats_k$mean)
+ggplot(n_stats_k, aes(x = factor(Area))) +
+  # Incertezza del modello
+  geom_errorbar(aes(ymin = q5, ymax = q95), width = 0.2, color = "royalblue") +
+  # Stima media del modello
+  geom_point(aes(y = mean, color = "Abundance estimate (N)"), size = 4) +
+  # Dato grezzo (Individui diversi osservati)
+  geom_point(aes(y = Observed, color = "Raw data (observed)"), shape = 17, size = 4) +
+  geom_hline(yintercept = mean_N_sessione, linetype = "dashed",
+    color =  "darkgrey", size = 0.8) +
+  annotate("text", x = 0.8, y = mean_N_sessione + 1,
+    label = "Mean abundance", color = "darkgrey", hjust = 0) +
+  scale_color_manual(values = c("Abundance estimate (N)" = "royalblue", "Raw data (observed)" = "red")) +
+  labs(title = "Comparison between estimated and observed individuals",
+       subtitle = "The difference represents the individuals estimated but not observed",
+       x = "Study area", y = "Number of individuals") +
+  theme_minimal()
+
+```
+
+
+RICOMINCIARE DA QUI
+
+
+```{r}
+#| label: shrinkage-N-area
+#| fig-cap: "Shrinkage: Naive vs Model"
+
+# Estrai i dati grezzi dal tuo oggetto 'y' (la matrice di cattura)
+# n_osservati deve essere un vettore di 23 elementi per l'area scelta
+n_osservati_area1 <- apply(stan_data$y[stan_data$area_idx, ], 2, sum) 
+
+# Estrai le stime del modello per l'area 1
+n_stats_area1 <- fit$summary("N") %>% 
+  filter(grepl("N\\[1,", variable)) %>% 
+  mutate(Sessione = 1:23, 
+         Osservati = n_osservati_area1,
+         Data = master_dates) # Le date che abbiamo definito prima
+
+        
+
+ggplot(n_stats_area1, aes(x = Data)) +
+  # Area di incertezza del modello
+  geom_ribbon(aes(ymin = q5, ymax = q95), fill = "royalblue", alpha = 0.2) +
+  # Linea della stima media N
+  geom_line(aes(y = mean, color = "Stima Modello (N)"), size = 1) +
+  # Punti dei dati grezzi osservati
+  geom_point(aes(y = Osservati, color = "Catturati (Dato Grezzo)"), size = 2) +
+  scale_color_manual(values = c("Stima Modello (N)" = "royalblue", "Catturati (Dato Grezzo)" = "red")) +
+  labs(title = "Area 1: Shrinkage e Correzione dell'Abbondanza",
+       subtitle = "Confronto tra individui catturati e popolazione stimata per sessione",
+       x = "Data Sessione", y = "Numero di Individui") +
+  theme_minimal()
+```
+
+
+## 5. Overconfidence
+
+
+
+We check it using Posterior Predictive Checks (PPC), i.e., comparing the data simulated by the model with the actual observed data. If the actual data consistently fall outside the ranges predicted by the model, there is a calibration problem.
+
+Another way is to check the within- and between-variance ratio: if the variance between sites is estimated to be almost zero, the model is treating all areas as identical, ignoring their specific characteristics (over-shrinkage).
+
+```{r}
+#| label: overconfidence
+#| fig-cap: "Posterior Predictive Checks: Naive Occupancy Predicted vs Observed (X)"
+
+####---- Overconfidence ----
+# Dati Mancanti/Sforzo: Controlla se le griglie con molti mask_array = 0 (poche occasioni campionate)
+# hanno intervalli di credibilità molto larghi. Se non li hanno, il modello è troppo "fiducioso" (overconfident).
+# Calcolo dello sforzo totale per SITO (somma le occasioni attive nelle due sessioni)
+sforzo_per_sito <- rowSums(stan_data$mask_array[,1,]) + rowSums(stan_data$mask_array[,2,])
+
+# Creiamo un dataframe temporaneo pulito per lo sforzo
+df_sforzo_siti <- data.frame(
+  site_idx = 1:stan_data$N_sites,
+  effort_sito = sforzo_per_sito
+)
+
+# Uniamo lo sforzo alla legenda dei siti e poi aggreghiamo per griglia
+sforzo_summary <- mapping_siti_identificati %>%
+  left_join(df_sforzo_siti, by = "site_idx") %>%
+  group_by(sampling_grid) %>%
+  summarise(effort_tot = sum(effort_sito, na.rm = TRUE))
+
+# Ora l'unione per il plot sarà corretta
+incertezza_summary <- psi_summary %>%
+  mutate(width = q95 - q5) %>%
+  group_by(grid_name) %>%
+  summarise(mean_uncertainty = mean(width)) %>%
+  left_join(sforzo_summary, by = c("grid_name" = "sampling_grid"))
+
+# 3. Plot Overconfidence
+ggplot(incertezza_summary, aes(x = effort_tot, y = mean_uncertainty)) +
+  geom_point(aes(color = grid_name), size = 5) +
+  geom_smooth(method = "lm", se = FALSE, color = "grey", linetype = "dashed") +
+  labs(
+    title = "Check Overconfidence: Più Sforzo = Meno Incertezza?",
+    x = "Numero Totale di Occasioni Attive (Sforzo)",
+    y = "Incertezza del Modello (Ampiezza CI 95%)"
+  ) +
+  theme_minimal()
+```
+
+<!-- Il grafico dell'Incertezza conferma che il modello è "onesto":
+Esiste una tendenza generale negativa (linea tratteggiata grigia):
+all'aumentare dello sforzo totale (numero di occasioni attive),
+l'incertezza del modello tende a diminuire.
+Griglie come Gr_GP1, con uno sforzo inferiore (circa 500),
+presentano infatti un'incertezza più alta rispetto a griglie con sforzo maggiore come Gr_GS2.
+La variabilità dei punti (come l'incertezza elevata di Gr_AM2)
+indica che il modello non sta "inventando" precisione artificiale,
+ma riflette fedelmente la qualità del dato in ogni singola area. -->
+Il check sull'overconfidence rivela che la precisione delle stime non è strettamente dipendente dal volume di campionamento (sforzo). Griglie come Gr_AM1 mostrano un'elevata precisione nonostante uno sforzo contenuto, a indicare che la saturazione del segnale di presenza (occupancy prossima a 1) compensa il minor numero di occasioni attive. Al contrario, l'incertezza maggiore in GS1, a fronte di uno sforzo superiore, riflette una maggiore variabilità intrinseca nei processi di colonizzazione/estinzione di quell'area.
+
+## 4. Prior sentivity checks
+
+```{r}
+#| label: prior-sensitivity-models
+
+###---- Prior sensitivity ----
+# fit_orig <- fit # mod_n = 3
+# fit_wide <- fit # mod_n = 4
+# fit_tight <- fit # mod_n = 5
+
+# Models recontruction
+file_csv <- list.files(
+  path = "cmdstan_output",
+  pattern = "model_3_.*\\.csv",
+  full.names = TRUE
+)
+fit_orig <- as_cmdstan_fit(file_csv)
+
+file_csv <- list.files(
+  path = "cmdstan_output",
+  pattern = "model_4_.*\\.csv",
+  full.names = TRUE
+)
+fit_wide <- as_cmdstan_fit(file_csv)
+
+file_csv <- list.files(
+  path = "cmdstan_output",
+  pattern = "model_5_.*\\.csv",
+  full.names = TRUE
+)
+fit_tight <- as_cmdstan_fit(file_csv)
+```
+
+### Per le aree di studio
+
+```{r}
+#| label: prior-sensitivity-comparison
+#| fig-cap: "Prior sensitivity checks: Comparison of global parameters"
+
+####---- for the study areas ----
+{
+  # Mean of key parameters for the different models (different priors)
+  summary_wide <- fit_wide$summary(c(
+    "alpha_p",
+    "mu_area_psi",
+    "mu_area_gamma",
+    "mu_area_eps"
+  ))
+  summary_tight <- fit_tight$summary(c(
+    "alpha_p",
+    "mu_area_psi",
+    "mu_area_gamma",
+    "mu_area_eps"
+  ))
+  summary_orig <- fit_orig$summary(c(
+    "alpha_p",
+    "mu_area_psi",
+    "mu_area_gamma",
+    "mu_area_eps"
+  ))
+
+  # Comparison table
+  confronto_quant <- data.frame(
+    Parameter = summary_orig$variable,
+    Mean_orig = summary_orig$mean,
+    Mean_tight = summary_tight$mean,
+    Mean_wide = summary_wide$mean
+  ) %>%
+    mutate(
+      Diff_tight_pct = ((Mean_tight - Mean_orig) / Mean_orig) * 100,
+      Diff_wide_pct = ((Mean_wide - Mean_orig) / Mean_orig) * 100
+    )
+
+  # Forest plot
+  df_forest <- bind_rows(
+    fit_orig$summary(c(
+      "alpha_p",
+      "mu_area_psi",
+      "mu_area_gamma",
+      "mu_area_eps"
+    )) %>%
+      mutate(Prior = "Original (Normal(0,2))"),
+    fit_tight$summary(c(
+      "alpha_p",
+      "mu_area_psi",
+      "mu_area_gamma",
+      "mu_area_eps"
+    )) %>%
+      mutate(Prior = "Tight (Normal(0,1))"),
+    fit_wide$summary(c(
+      "alpha_p",
+      "mu_area_psi",
+      "mu_area_gamma",
+      "mu_area_eps"
+    )) %>%
+      mutate(Prior = "Wide (Normal(0,4))")
+  )
+  ggplot(df_forest, aes(x = mean, y = variable, color = Prior)) +
+    geom_point(position = position_dodge(width = 0.5), size = 3) +
+    geom_errorbarh(
+      aes(xmin = q5, xmax = q95),
+      position = position_dodge(width = 0.5),
+      height = 0.2
+    ) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+    labs(
+      title = "Prior sensitivity check",
+      subtitle = "Comparison of global parameters (Logit Scale)",
+      x = "Estimated value (Posterior Mean and 95% CrI)",
+      y = "Parameter"
+    ) +
+    theme_minimal() +
+    scale_color_brewer(palette = "Set1")
+}
+```
+
+Convergenza dei risultati: i tre punti per ogni parametro sono quasi
+sempre sovrapposti o molto vicini. Se le barre di errore si sovrappongono largamente, la differenza non è statisticamente rilevante.     
+Stabilità di $\alpha_p$: è il parametro con i tre punti più vicini in assoluto,
+a dimostrazione che la rilevabilità è stimata molto bene dal modello.    
+Sensitività del turnover: per mu_area_gamma o mu_area_eps
+i punti sono più distanti. In questo caso, il turnover stagionale mostra una sensibilità moderata, riflettendo la minore densità di informazioni sui processi dinamici rispetto allo stato di occupazione iniziale.
+
+#### Overlap tra posteriors
+
+```{r}
+#| label: prior-sensitivity-overlaps
+#| fig-cap: "Prior sensitivity checks: Comparison of global parameters"
+
+####---- Overlap posteriors e plot ----
+# Estrai i draws come data frame o matrice
+# (Supponendo che i tuoi oggetti siano fit_orig, fit_tight, fit_wide)
+
+# alpha_p (Rilevabilità)
+{
+  draws_orig_p <- as.numeric(fit_orig$draws("alpha_p"))
+  draws_tight_p <- as.numeric(fit_tight$draws("alpha_p"))
+  draws_wide_p <- as.numeric(fit_wide$draws("alpha_p"))
+  # Calcolo overlap per la rilevabilità
+  overlap_p <- overlap(draws_orig_p, draws_tight_p)
+  print(paste("Overlap Detection (Orig vs Tight):", overlap_p))
+  overlap_p <- overlap(draws_orig_p, draws_wide_p)
+  print(paste("Overlap Detection (Orig vs Wide):", overlap_p))
+  # Un valore di 0.95 significa che le due stime sono quasi identiche
+  # Visualizzazione della densità per mu_area_psi[1]
+  df_plot <- data.frame(
+    value = c(draws_orig_p, draws_tight_p, draws_wide_p),
+    Prior = rep(c("Original", "Tight", "Wide"), each = length(draws_orig_p))
+  )
+  ggplot(df_plot, aes(x = value, fill = Prior)) +
+    geom_density(alpha = 0.4) +
+    labs(
+      title = "Posterior Overlap: Detection",
+      x = "Valore (Logit)",
+      y = "Densità"
+    ) +
+    theme_minimal()
+}
+
+
+# psi, gamma ed epsilon
+{
+  # Funzione per generare il confronto completo per un parametro
+  compare_priors_area <- function(param_base, title_label) {
+    overlap_plots <- list()
+    areas <- c("AM", "GP", "GS")
+
+    for (i in 1:3) {
+      vble <- paste0(param_base, "[", i, "]")
+
+      # Estrazione draws
+      d_orig <- as.numeric(fit_orig$draws(vble))
+      d_tight <- as.numeric(fit_tight$draws(vble))
+      d_wide <- as.numeric(fit_wide$draws(vble))
+
+      # Calcolo Overlap numerico
+      ov_tight <- round(overlap(d_orig, d_tight), 2)
+      ov_wide <- round(overlap(d_orig, d_wide), 2)
+
+      cat(sprintf("\n--- %s - Area %s ---\n", param_base, areas[i]))
+      cat(sprintf("Overlap (Orig vs Tight): %s\n", ov_tight))
+      cat(sprintf("Overlap (Orig vs Wide):  %s\n", ov_wide))
+
+      # Creazione DF per il plot
+      df_plot <- data.frame(
+        value = c(d_orig, d_tight, d_wide),
+        Prior = rep(c("Original", "Tight", "Wide"), each = length(d_orig))
+      )
+
+      # Plotting
+      overlap_plots[[i]] <- ggplot(df_plot, aes(x = value, fill = Prior)) +
+        geom_density(alpha = 0.4) +
+        labs(
+          subtitle = paste("Area:", areas[i]),
+          x = "Value (Logit)",
+          y = "Density"
+        ) +
+        theme_minimal()
+    }
+
+    # Assemblaggio finale con patchwork
+    combined_plot <- (overlap_plots[[1]] |
+      overlap_plots[[2]] |
+      overlap_plots[[3]]) +
+      plot_layout(guides = 'collect') +
+      plot_annotation(title = paste('Posterior Overlap -', title_label)) &
+      theme(legend.position = 'bottom')
+
+    return(combined_plot)
+  }
+}
+# Per l'Occupancy
+plot_overlap_psi <- compare_priors_area("mu_area_psi", "Occupancy (Psi)")
+plot_overlap_psi
+
+# Per la Colonizzazione
+plot_overlap_gamma <- compare_priors_area(
+  "mu_area_gamma",
+  "Colonization (Gamma)"
+)
+plot_overlap_gamma
+
+# Per l'Estinzione
+plot_overlap_eps <- compare_priors_area("mu_area_eps", "Extinction (Epsilon)")
+plot_overlap_eps
+```
+
+### Per le griglie
+
+```{r}
+#| label: prior-sensitivity-occupancy
+#| fig-cap: "Prior sensitivity checks: Occupancy per grid"
+#| warning: false
+#| message: false
+
+####---- for the grids -----
+
+#####---- occupancy ----
+{
+  # Extract psi_grids from the models with different priors
+  df_grids_forest <- bind_rows(
+    fit_orig$summary("psi_grids") %>% mutate(Prior = "Original (0,2)"),
+    fit_tight$summary("psi_grids") %>% mutate(Prior = "Tight (0,1)"),
+    fit_wide$summary("psi_grids") %>% mutate(Prior = "Wide (0,5)")
+  ) %>%
+    mutate(
+      grid_idx = as.numeric(str_extract(variable, "(?<=\\[)\\d+")),
+      sess_idx = as.numeric(str_extract(variable, "\\d+(?=\\])"))
+    ) %>%
+    # Add grid names for readability
+    left_join(legend_grids, by = c("grid_idx" = "grid_id_stan"))
+
+  # Sensitivity plot - session 1
+  ggplot(
+    df_grids_forest %>% filter(sess_idx == 1),
+    aes(x = mean, y = grid_name, color = Prior)
+  ) +
+    geom_point(position = position_dodge(width = 0.6), size = 3) +
+    geom_errorbarh(
+      aes(xmin = q5, xmax = q95),
+      position = position_dodge(width = 0.6),
+      height = 0.2
+    ) +
+    labs(
+      #title = "Prior sensitivity check at grid level - Occupancy",
+      subtitle = "Session 1",
+      x = "Occupancy probability (Mean + 95% CrI)",
+      y = "Grid"
+    ) +
+    theme_minimal() +
+    scale_color_brewer(palette = "Set1") -> sensitivity_grids_psi_sess1
+
+  # Sensitivity plot - session 2
+  ggplot(
+    df_grids_forest %>% filter(sess_idx == 2),
+    aes(x = mean, y = grid_name, color = Prior)
+  ) +
+    geom_point(position = position_dodge(width = 0.6), size = 3) +
+    geom_errorbarh(
+      aes(xmin = q5, xmax = q95),
+      position = position_dodge(width = 0.6),
+      height = 0.2
+    ) +
+    labs(
+      #title = "Prior sensitivity check at grid level - Occupancy",
+      subtitle = "Session 2",
+      x = "Probabilità di Occupazione (Mean + 95% CrI)",
+      y = "Griglia"
+    ) +
+    theme_minimal() +
+    scale_color_brewer(palette = "Set1") -> sensitivity_grids_psi_sess2
+}
+sensitivity_grids_psi_sess1 +
+  sensitivity_grids_psi_sess2 +
+  plot_layout(guides = 'collect') +
+  plot_annotation(
+    title = 'Prior sensitivity check at grid level - Occupancy'
+  ) &
+  theme(legend.position = 'bottom')
+```
+
+```{r}
+#| label: prior-sensitivity-gamma-epsilon
+#| fig-cap: "Prior sensitivity checks: Dynamic parameters per grid"
+#| warning: false
+#| message: false
+
+#####---- gamma and epsilon----
+{
+  # helper function to avoid repetition
+  reconstruct_dynamic_sensitivity <- function(fit_obj, prior_label) {
+    # 1. Estrai il summary completo
+    summ <- fit_obj$summary(c(
+      "mu_area_gamma",
+      "mu_area_eps",
+      "sigma_area_gamma",
+      "sigma_area_eps",
+      "beta_grid_gamma_raw",
+      "beta_grid_eps_raw"
+    ))
+
+    # 2. Crea tabelle separate per le medie delle aree (mu)
+    mu_gamma <- summ %>%
+      filter(str_detect(variable, "mu_area_gamma")) |>
+      mutate(area_id = unique(area_index)) #%>% pull(mean)
+    mu_eps <- summ %>%
+      filter(str_detect(variable, "mu_area_eps")) |>
+      mutate(area_id = unique(area_index)) #%>% pull(mean)
+
+    # 3. Estrai le deviazioni standard (sigma)
+    sig_g <- summ %>%
+      filter(str_detect(variable, "sigma_area_gamma")) |>
+      mutate(area_id = unique(area_index)) #%>% pull(mean)
+    sig_e <- summ %>%
+      filter(str_detect(variable, "sigma_area_eps")) |>
+      mutate(area_id = unique(area_index)) #%>% pull(mean)
+
+    # 4. Estrai i residui delle griglie (beta_raw)
+    beta_g <- summ %>%
+      filter(str_detect(variable, "beta_grid_gamma_raw")) |>
+      mutate(grid_id_stan = 1:6) #%>% pull(mean)
+    beta_e <- summ %>%
+      filter(str_detect(variable, "beta_grid_eps_raw")) |>
+      mutate(grid_id_stan = 1:6) #%>% pull(mean)
+
+    # 5. Ricostruisci i valori per ogni griglia nella legenda
+    legend_grids %>%
+      mutate(
+        Prior = prior_label,
+        area_id = area_index
+      ) |>
+      left_join(mu_gamma[, c("area_id", "mean")], by = "area_id") |>
+      rename(mu_gamma = mean) |>
+      left_join(mu_eps[, c("area_id", "mean")], by = "area_id") |>
+      rename(mu_eps = mean) |>
+      left_join(sig_g[, c("area_id", "mean")], by = "area_id") |>
+      rename(sig_g = mean) |>
+      left_join(sig_e[, c("area_id", "mean")], by = "area_id") |>
+      rename(sig_e = mean) |>
+      left_join(
+        beta_g[, c("grid_id_stan", "mean", "sd")],
+        by = "grid_id_stan"
+      ) |>
+      rename(beta_g = mean, beta_g_sd = sd) |>
+      left_join(
+        beta_e[, c("grid_id_stan", "mean", "sd")],
+        by = "grid_id_stan"
+      ) |>
+      rename(beta_e = mean, beta_e_sd = sd) |>
+      mutate(
+        # Usiamo area_id e grid_id_stan come indici per pescare dai vettori estratti
+        gamma_logit = mu_gamma + (beta_g * sig_g),
+        gamma_sd_logit = beta_g_sd * sig_g,
+        eps_logit = mu_eps + (beta_e * sig_e),
+        eps_sd_logit = beta_e_sd * sig_g,
+
+        # Trasformazione in probabilità di gamma
+        gamma_prob = plogis(gamma_logit),
+        # Intervalli di confidenza (approssimati su scala Logit e poi trasformati)
+        gamma_low = plogis(gamma_logit - 1.96 * gamma_sd_logit),
+        gamma_high = plogis(gamma_logit + 1.96 * gamma_sd_logit),
+
+        # Trasformazione in probabilità di epsilon
+        eps_prob = plogis(eps_logit),
+        # Intervalli di confidenza (approssimati su scala Logit e poi trasformati)
+        eps_low = plogis(eps_logit - 1.96 * eps_sd_logit),
+        eps_high = plogis(eps_logit + 1.96 * eps_sd_logit)
+      )
+  }
+  # Generazione del dataframe finale
+  df_dynamic_forest <- bind_rows(
+    reconstruct_dynamic_sensitivity(fit_orig, "Original (0,2)"),
+    reconstruct_dynamic_sensitivity(fit_tight, "Tight (0,1)"),
+    reconstruct_dynamic_sensitivity(fit_wide, "Wide (0,5)")
+  )
+  # 1. Grafico per la Colonizzazione (Gamma)
+  plot_gamma <- ggplot(
+    df_dynamic_forest,
+    aes(x = gamma_prob, y = grid_name, color = Prior)
+  ) +
+    geom_point(position = position_dodge(width = 0.6), size = 3) +
+    geom_errorbarh(
+      aes(xmin = gamma_low, xmax = gamma_high),
+      height = 0.3,
+      alpha = 0.5,
+      position = position_dodge(width = 0.6)
+    ) +
+    # Usiamo una scala 0-1 perché sono probabilità
+    scale_x_continuous(limits = c(0, 1)) +
+    labs(
+      title = "Prior sensitivity check - Colonization",
+      x = "Colonization probability",
+      y = "Grid"
+    ) +
+    theme_minimal() +
+    scale_color_brewer(palette = "Set1")
+
+  # 2. Grafico per l'Estinzione (Epsilon)
+  plot_eps <- ggplot(
+    df_dynamic_forest,
+    aes(x = eps_prob, y = grid_name, color = Prior)
+  ) +
+    geom_point(position = position_dodge(width = 0.6), size = 3) +
+    geom_errorbarh(
+      aes(xmin = eps_low, xmax = eps_high),
+      height = 0.3,
+      alpha = 0.5,
+      position = position_dodge(width = 0.6)
+    ) +
+    scale_x_continuous(limits = c(0, 1)) +
+    labs(
+      title = "Prior sensitivity check - Extinction",
+      x = "Extinction probability",
+      y = ""
+    ) + # Rimuoviamo l'etichetta y per non ripeterla
+    theme_minimal() +
+    scale_color_brewer(palette = "Set1")
+
+  # Unione dei due grafici
+  plot_gamma +
+    plot_eps +
+    plot_layout(guides = 'collect') &
+    theme(legend.position = 'bottom')
+}
+```
+
+Sebbene i parametri dinamici mostrino una certa sensibilità all'ampiezza delle prior — fenomeno atteso data la durata stagionale del monitoraggio — la coerenza dei segnali principali (alta colonizzazione in GS e persistenza in AM) conferma la validità biologica delle stime prodotte con le prior originali.
+in AM e GP il modello è ottimista rispetto alla colonizzazione, mentre il segnale in GS è forte
+
+#### Overlap tra posteriors
+
+```{r}
+#| label: prior-sensitivity-overlaps-grids
+#| fig-cap: "Prior sensitivity checks: Occupancy overlap per grid"
+
+# overlap per griglia
+{
+  # Funzione per ricostruire i draws di psi per una specifica griglia
+  get_grid_draws <- function(fit, area_idx, grid_idx) {
+    mu <- as.numeric(fit$draws(paste0("mu_area_psi[", area_idx, "]")))
+    sigma <- as.numeric(fit$draws(paste0("sigma_area_psi[", area_idx, "]")))
+    raw <- as.numeric(fit$draws(paste0("beta_grid_psi_raw[", grid_idx, "]")))
+    # Trasformiamo da scala logit a probabilità (0-1)
+    return(plogis(mu + (raw * sigma)))
+  }
+
+  draws_grid_orig <- vector("list", 6)
+  draws_grid_tight <- vector("list", 6)
+  draws_grid_wide <- vector("list", 6)
+  overlap_plots <- vector("list", 6)
+  legend_grids |>
+    mutate(area_index = c(1, 1, 1, 2, 3, 3)) -> legend_grids
+
+  for (i in 1:6) {
+    a_idx <- legend_grids$area_index[legend_grids$grid_id_stan == i]
+    g_name <- legend_grids$grid_name[legend_grids$grid_id_stan == i]
+    # Estraiamo i draws per AM1 (Area 1, Griglia 1) dai tre modelli
+    draws_grid_orig[[i]] <- get_grid_draws(fit_orig, a_idx, i)
+    draws_grid_tight[[i]] <- get_grid_draws(fit_tight, a_idx, i)
+    draws_grid_wide[[i]] <- get_grid_draws(fit_wide, a_idx, i)
+    # Calcolo Overlap numerico
+    ov_tight <- round(overlap(draws_grid_orig[[i]], draws_grid_tight[[i]]), 2)
+    ov_wide <- round(overlap(draws_grid_orig[[i]], draws_grid_wide[[i]]), 2)
+    cat(sprintf("\n--- Occupancy - Grid %s (%s) ---\n", i, g_name))
+    cat(sprintf("Overlap (Orig vs Tight): %s\n", ov_tight))
+    cat(sprintf("Overlap (Orig vs Wide):  %s\n", ov_wide))
+
+    df_plot <- data.frame(
+      value = c(
+        draws_grid_orig[[i]],
+        draws_grid_tight[[i]],
+        draws_grid_wide[[i]]
+      ),
+      Prior = rep(
+        c("Original", "Tight", "Wide"),
+        each = length(draws_grid_orig[[i]])
+      )
+    )
+    overlap_plots[[i]] <- ggplot(df_plot, aes(x = value, fill = Prior)) +
+      geom_density(alpha = 0.4) +
+      labs(
+        subtitle = paste("Grid:", i, g_name),
+        x = "Value (Logit)",
+        y = "Density"
+      ) +
+      theme_minimal()
+  }
+}
+# Assemblaggio finale con patchwork
+combined_plot <- (overlap_plots[[1]] |
+  overlap_plots[[2]] |
+  overlap_plots[[3]]) /
+  (overlap_plots[[4]] |
+    overlap_plots[[5]] |
+    overlap_plots[[6]]) +
+  plot_layout(guides = 'collect') +
+  plot_annotation(title = 'Posterior Overlap - Grids - Occupancy') &
+  theme(legend.position = 'bottom')
+combined_plot
+```
