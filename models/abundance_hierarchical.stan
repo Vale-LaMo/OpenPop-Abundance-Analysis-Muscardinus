@@ -5,11 +5,20 @@ data {
   array[M_total, K] int<lower=0, upper=1> y; 
   array[M_total] int<lower=1, upper=N_areas> area_idx; // Area ID for each individual
   array[K - 1] real<lower=0> delta;   // Time intervals between sessions
+  array[K - 1] int<lower=0, upper=1> is_winter; // Seasonality, 1 for winter, 0 otherwise
+  real p_prior_mean;
+  real p_prior_sd;
+  real mu_active_mean;
+  real mu_active_sd;
+  real mu_hibernation_mean;
+  real mu_hibernation_sd;
 }
 
 parameters {
   // Global Hyper-parameters (shared across areas)
-  real<lower=0> mu;                   // Global mortality rate
+  // real<lower=0> mu;                   // Global mortality rate
+  real<lower=0> mu_active;               // Mortality rate active season
+  real<lower=0> mu_hibernation;          // Mortality rate hibernation
   
   // Area-specific parameters
   vector<lower=0, upper=1>[N_areas] psi_area; 
@@ -18,26 +27,35 @@ parameters {
 }
 
 transformed parameters {
+  // vector<lower=0, upper=1>[K - 1] phi; 
+  // for (k in 1:(K - 1))
+  //   phi[k] = exp(-mu * delta[k]);    // Derived survival probabilities - besed on mu and taking into account
+                                        // the exact time interval for the session
   vector<lower=0, upper=1>[K - 1] phi; 
-  for (k in 1:(K - 1))
-    phi[k] = exp(-mu * delta[k]);     // Derived survival probabilities - besed on mu and taking into account
-                                      // the exact time interval for the session
+    for (k in 1:(K - 1)) {
+      if (is_winter[k] == 1)
+        phi[k] = exp(-mu_hibernation * delta[k]); 
+      else
+        phi[k] = exp(-mu_active * delta[k]);
+    }
 }
 
 model {
   // Weakly Informative Priors
-  mu ~ normal(0, 1);
-  psi_area ~ beta(1, 1);
+  // mu ~ normal(0, 1);
+  mu_active ~ normal(mu_active_mean, mu_active_sd); // baseline (0, 1.5), suff. regular (0, 1), regular. (0, 0.5), wide (0, 2)
+  mu_hibernation ~ normal(mu_hibernation_mean, mu_hibernation_sd);
+  psi_area ~ beta(1, 1); // fixed
   
   // the structure with nested for loops reflects the spatial heterogeneity
   for (s in 1:N_areas) { 
     // each area has its own history of detectability and recruitment (the model does not force Area 1
     // to have the same detection probability of Area 6 and so on)
-    alpha_p[s] ~ normal(0, 2);
+    alpha_p[s] ~ normal(p_prior_mean, p_prior_sd); // baseline (0, 1.5), suff. regular (0, 1), regular. (0, 0.5), wide (0, 2); informative (-1, 1)
     for (k in 1:K) {
       // within each area, the entry prob beta can be different at each session
       // so the model can capture peaks in recruitment at specific time points
-      beta[s, k] ~ beta(1, 1);
+      beta[s, k] ~ beta(1, 1); // fixed
     }
   }
 
@@ -110,21 +128,136 @@ model {
   }
 }
 
+// generated quantities {
+//   matrix[N_areas, K] N = rep_matrix(0, N_areas, K); // Multi-site abundance matrix
+
+//   for (i in 1:M_total) {
+//     int s = area_idx[i];
+//     vector[K] q_alive;
+//     real q_not_entered_curr = psi_area[s] * (1 - beta[s, 1]);
+    
+//     q_alive[1] = psi_area[s] * beta[s, 1];
+//     N[s, 1] += q_alive[1];
+
+//     for (k in 2:K) {
+//       q_alive[k] = q_alive[k-1] * phi[k-1] + q_not_entered_curr * beta[s, k];
+//       q_not_entered_curr *= (1 - beta[s, k]);
+//       N[s, k] += q_alive[k]; // Expected abundance
+//     }
+//   }
+// }
+
+
 generated quantities {
-  matrix[N_areas, K] N = rep_matrix(0, N_areas, K); // Multi-site abundance matrix
+
+  matrix[N_areas, K] N = rep_matrix(0.0, N_areas, K);
+  vector[N_areas] N_super = rep_vector(0.0, N_areas);
+  matrix[N_areas, K] p_eff;
+  vector[M_total] log_lik;
+
+  // Detection probabilities
+  for (s in 1:N_areas)
+    for (k in 1:K)
+      p_eff[s, k] = inv_logit(alpha_p[s, k]);
 
   for (i in 1:M_total) {
+
     int s = area_idx[i];
+
+    // --------------------------
+    // Superpopulation expectation
+    // --------------------------
+    N_super[s] += psi_area[s];
+
+    // --------------------------
+    // Ecological expectation of N
+    // (same working structure as your stable version)
+    // --------------------------
     vector[K] q_alive;
-    real q_not_entered_curr = psi_area[s] * (1 - beta[s, 1]);
-    
-    q_alive[1] = psi_area[s] * beta[s, 1];
-    N[s, 1] += q_alive[1];
+    real q_not_entered_curr;
+
+    q_not_entered_curr = psi_area[s] * (1 - beta[s,1]);
+
+    q_alive[1] = psi_area[s] * beta[s,1];
+    N[s,1] += q_alive[1];
 
     for (k in 2:K) {
-      q_alive[k] = q_alive[k-1] * phi[k-1] + q_not_entered_curr * beta[s, k];
-      q_not_entered_curr *= (1 - beta[s, k]);
-      N[s, k] += q_alive[k]; // Expected abundance
+      q_alive[k] =
+        q_alive[k-1] * phi[k-1]
+        + q_not_entered_curr * beta[s,k];
+
+      q_not_entered_curr *= (1 - beta[s,k]);
+
+      N[s,k] += q_alive[k];
     }
+
+    // --------------------------
+    // LOG-LIK (copied from model block logic)
+    // --------------------------
+
+    real log_psi = log(psi_area[s]);
+    real lp0 = log1m(psi_area[s]);
+
+    for (k in 1:K)
+      if (y[i,k] == 1)
+        lp0 = negative_infinity();
+
+    vector[K] log_alpha_alive;
+    vector[K] log_alpha_not_entered;
+    vector[K] log_alpha_dead;
+
+    // Forward init
+    if (y[i,1] == 1)
+      log_alpha_not_entered[1] = negative_infinity();
+    else
+      log_alpha_not_entered[1] = log1m(beta[s,1]);
+
+    log_alpha_alive[1] =
+      log(beta[s,1]) +
+      bernoulli_lpmf(y[i,1] | p_eff[s,1]);
+
+    log_alpha_dead[1] = negative_infinity();
+
+    for (k in 2:K) {
+
+      real surv_prev = phi[k-1];
+
+      if (y[i,k] == 1) {
+        log_alpha_not_entered[k] = negative_infinity();
+        log_alpha_dead[k] = negative_infinity();
+      } else {
+        log_alpha_not_entered[k] =
+          log_alpha_not_entered[k-1]
+          + log1m(beta[s,k]);
+
+        log_alpha_dead[k] =
+          log_sum_exp(
+            log_alpha_dead[k-1],
+            log_alpha_alive[k-1] + log1m(surv_prev)
+          );
+      }
+
+      log_alpha_alive[k] =
+        log_sum_exp(
+          log_alpha_alive[k-1] + log(surv_prev),
+          log_alpha_not_entered[k-1] + log(beta[s,k])
+        ) +
+        bernoulli_lpmf(y[i,k] | p_eff[s,k]);
+    }
+
+    array[3] real final_log_probs;
+    final_log_probs[1] = log_alpha_alive[K];
+    final_log_probs[2] = log_alpha_not_entered[K];
+    final_log_probs[3] = log_alpha_dead[K];
+
+    real log_prob_exists =
+      log_sum_exp(final_log_probs);
+
+    log_lik[i] =
+      log_sum_exp(lp0, log_psi + log_prob_exists);
   }
 }
+
+
+
+

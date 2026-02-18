@@ -58,9 +58,26 @@ master_dates <- sort(unique(as.Date(c(
 time_intervals <- intervals_months(master_dates)
 K_total <- length(master_dates)
 
-
 # List of study area names as they appear in your Excel sheets
 areas <- c("S1", "S2", "S3", "R1", "R2", "R3")
+
+# Calculte is_winter according to months in master_dates
+is_winter <- sapply(1:(length(master_dates) - 1), function(k) {
+  if (time_intervals[k] > 3) {
+    return(1) # Hibernation/Winter
+  } else {
+    return(0) # Active season
+  }
+})
+
+# Debug
+debug_seasons <- data.frame(
+  Inizio = master_dates[-length(master_dates)],
+  Fine = master_dates[-1],
+  Mesi = round(time_intervals, 1),
+  Winter = is_winter
+)
+# print(debug_seasons)
 
 # -----------------------------------------------------------
 # file di riferimento "data/data_abundance.xlsx", sheet = areas[i])
@@ -99,5 +116,6 @@ stan_data <- list(
   M_total = nrow(y_stacked), # Total number of individuals in augmented dataset
   y = y_stacked, # Augmented dataset
   area_idx = area_idx_stacked, # ID number for each study area
-  delta = time_intervals # Time intervals in months
+  delta = time_intervals, # Time intervals in months
+  is_winter = is_winter # Seasonality vector (0/1)
 )

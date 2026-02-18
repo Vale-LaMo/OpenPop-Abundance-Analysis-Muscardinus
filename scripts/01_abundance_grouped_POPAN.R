@@ -117,15 +117,16 @@ lista_data_ch <- vector("list", length(areas))
 
 # Fit models
 {
-  model1 <- mark( # full
+  model1 <- mark(
+    # full
     dormouse.proc,
     dormouse.ddl,
     model.parameters = list(
-      Phi = list(formula = ~Season * valley + altitude),
-      p = list(formula = ~ time),
+      Phi = list(formula = ~ Season * valley + altitude),
+      p = list(formula = ~time),
       pent = list(formula = ~time),
-      N = list(formula = ~ group)
-      ),
+      N = list(formula = ~group)
+    ),
     model.name = "full",
     filename = paste0("POPAN_full")
   )
@@ -133,11 +134,11 @@ lista_data_ch <- vector("list", length(areas))
     dormouse.proc,
     dormouse.ddl,
     model.parameters = list(
-      Phi = list(formula = ~Season * valley + altitude),
-      p = list(formula = ~ time),
+      Phi = list(formula = ~ Season * valley + altitude),
+      p = list(formula = ~time),
       pent = list(formula = ~Season),
-      N = list(formula = ~ group)
-      ),
+      N = list(formula = ~group)
+    ),
     model.name = "full_pent_seasonal",
     filename = paste0("POPAN_full_pent_seasonal")
   )
@@ -145,10 +146,10 @@ lista_data_ch <- vector("list", length(areas))
     dormouse.proc,
     dormouse.ddl,
     model.parameters = list(
-      Phi = list(formula = ~Season * valley + altitude),
-      p = list(formula = ~ time),
+      Phi = list(formula = ~ Season * valley + altitude),
+      p = list(formula = ~time),
       pent = list(formula = ~1),
-      N = list(formula = ~ group)
+      N = list(formula = ~group)
     ),
     model.name = "full_pent_constant",
     filename = paste0("POPAN_full_pent_constant")
@@ -157,10 +158,10 @@ lista_data_ch <- vector("list", length(areas))
     dormouse.proc,
     dormouse.ddl,
     model.parameters = list(
-      Phi = list(formula = ~Season * valley),
-      p = list(formula = ~ time),
+      Phi = list(formula = ~ Season * valley),
+      p = list(formula = ~time),
       pent = list(formula = ~1),
-      N = list(formula = ~ group)
+      N = list(formula = ~group)
     ),
     model.name = "Phi_season_valley",
     filename = paste0("POPAN_Phi_season_valley")
@@ -169,10 +170,10 @@ lista_data_ch <- vector("list", length(areas))
     dormouse.proc,
     dormouse.ddl,
     model.parameters = list(
-      Phi = list(formula = ~Season * altitude),
-      p = list(formula = ~ time),
+      Phi = list(formula = ~ Season * altitude),
+      p = list(formula = ~time),
       pent = list(formula = ~1),
-      N = list(formula = ~ group)
+      N = list(formula = ~group)
     ),
     model.name = "Phi_season_altitude",
     filename = paste0("POPAN_Phi_season_altitude")
@@ -184,7 +185,7 @@ lista_data_ch <- vector("list", length(areas))
       Phi = list(formula = ~1),
       p = list(formula = ~1),
       pent = list(formula = ~1),
-      N = list(formula = ~ group)
+      N = list(formula = ~group)
     ),
     model.name = "null",
     filename = paste0("POPAN_null")
@@ -196,7 +197,7 @@ lista_data_ch <- vector("list", length(areas))
       Phi = list(formula = ~Season),
       p = list(formula = ~1),
       pent = list(formula = ~time),
-      N = list(formula = ~ group)
+      N = list(formula = ~group)
     ),
     model.name = "basic_demo",
     filename = paste0("POPAN_basic_demo")
@@ -208,13 +209,15 @@ lista_data_ch <- vector("list", length(areas))
       Phi = list(formula = ~Season),
       p = list(formula = ~1),
       pent = list(formula = ~time),
-      N = list(formula = ~ group)
+      N = list(formula = ~group)
     ),
     model.name = "constant_p",
     filename = paste0("POPAN_constant_p")
   )
 }
 
+
+##---- Results ----
 
 # Model comparison
 {
@@ -231,23 +234,26 @@ lista_data_ch <- vector("list", length(areas))
 }
 
 # helper function to plot abundance results
-plot_popan_abundance <- function(chosen_model,
-                                 model_description = "Single Best Model",
-                                 is_averaged = FALSE) {
-  
+plot_popan_abundance <- function(
+  chosen_model,
+  model_description = "Single Best Model",
+  is_averaged = FALSE
+) {
   abund_data <- chosen_model$results$derived$N
-  
+
   # Mapping Group <-> Area
-  mapping <- arrange(distinct(dormouse.proc$data[,c("group", "area")]), group)
+  mapping <- arrange(distinct(dormouse.proc$data[, c("group", "area")]), group)
   area_names <- mapping$area
   n_areas <- length(area_names)
   n_occasions <- K_total
-  
+
   # Data frame of results
-  if(nrow(abund_data) != (n_areas * n_occasions)) {
-    stop("Error: The number of estimates in the model does not match Areas * Occasions.")
+  if (nrow(abund_data) != (n_areas * n_occasions)) {
+    stop(
+      "Error: The number of estimates in the model does not match Areas * Occasions."
+    )
   }
-  
+
   abund_clean <- data.frame(
     Area = rep(area_names, each = n_occasions),
     Occasion = rep(1:n_occasions, times = n_areas),
@@ -257,13 +263,16 @@ plot_popan_abundance <- function(chosen_model,
     LCL = abund_data$lcl,
     UCL = abund_data$ucl
   )
-  
+
   # 4. Creazione del Grafico (Versione Faceted)
-  p <- ggplot(abund_clean, aes(x = Date, y = Estimate, group = Area, color = Area, fill = Area)) +
+  p <- ggplot(
+    abund_clean,
+    aes(x = Date, y = Estimate, group = Area, color = Area, fill = Area)
+  ) +
     geom_ribbon(aes(ymin = LCL, ymax = UCL), color = NA, alpha = 0.2) +
     geom_line(linewidth = 0.8) +
     geom_point(size = 1.5) +
-    facet_wrap(~ Area, ncol = 3, scales = "free_y") + 
+    facet_wrap(~Area, ncol = 3, scales = "free_y") +
     scale_color_brewer(palette = "Dark2") +
     scale_fill_brewer(palette = "Dark2") +
     labs(
@@ -279,7 +288,7 @@ plot_popan_abundance <- function(chosen_model,
       strip.background = element_rect(fill = "grey90", color = NA),
       strip.text = element_text(face = "bold")
     )
-  
+
   return(list(plot = p, data = abund_clean))
 }
 
@@ -305,9 +314,15 @@ plot_popan_abundance <- function(chosen_model,
 #                     "outputs/POPAN_best_mod_resultsN.xlsx")
 
 # comparison with other model
-second_best <- plot_popan_abundance(model5, model_description = "Second best model" )
+second_best <- plot_popan_abundance(
+  model5,
+  model_description = "Second best model"
+)
 print(second_best$plot)
-third_best <- plot_popan_abundance(model3, model_description = "Third best model")
+third_best <- plot_popan_abundance(
+  model3,
+  model_description = "Third best model"
+)
 print(third_best$plot)
 
 
@@ -318,43 +333,52 @@ print(third_best$plot)
   Phi.altitude = list(formula = ~ Season * altitude)
   Phi.valley = list(formula = ~ Season * valley)
   # for p
-  p.time = list(formula = ~ time)
-  pent.const = list(formula = ~ 1)
-  N.group = list(formula = ~ group)
-  
+  p.time = list(formula = ~time)
+  pent.const = list(formula = ~1)
+  N.group = list(formula = ~group)
+
   # Run all pairings of models
-  dormouse.model.list=create.model.list("POPAN")
-  dormouse.results=mark.wrapper(dormouse.model.list,
-                                data=dormouse.proc,
-                                ddl=dormouse.ddl,delete=TRUE)
+  dormouse.model.list = create.model.list("POPAN")
+  dormouse.results = mark.wrapper(
+    dormouse.model.list,
+    data = dormouse.proc,
+    ddl = dormouse.ddl,
+    delete = TRUE
+  )
   dormouse.results
 }
 
 # averaged N estimates per area
 {
-  N.estimates=model.average(dormouse.results,
-                            "derived",
-                            parameter="N",
-                            vcv = TRUE)
+  N.estimates = model.average(
+    dormouse.results,
+    "derived",
+    parameter = "N",
+    vcv = TRUE
+  )
   # calculate unique individuals (Mt) for each area
-  Mt_per_sito <- aggregate(rep(1, nrow(all_data_ch)), 
-                           by = list(Area = all_data_ch$area), 
-                           FUN = sum)
+  Mt_per_sito <- aggregate(
+    rep(1, nrow(all_data_ch)),
+    by = list(Area = all_data_ch$area),
+    FUN = sum
+  )
   names(Mt_per_sito) <- c("Area", "Mt")
-  
+
   # Order Mt according to model levels
-  Mt_per_sito <- Mt_per_sito[match(levels(all_data_ch$area), Mt_per_sito$Area), ]
-  
+  Mt_per_sito <- Mt_per_sito[
+    match(levels(all_data_ch$area), Mt_per_sito$Area),
+  ]
+
   # Extract model averaging results
   av_data <- N.estimates$estimates
-  
+
   # Create data frame
   # RMark orders results by group, then by occasion
-  mapping <- arrange(distinct(dormouse.proc$data[,c("group", "area")]), group)
+  mapping <- arrange(distinct(dormouse.proc$data[, c("group", "area")]), group)
   area_names <- mapping$area
-  
-  abund_avg <- N.estimates$estimates %>% 
-    left_join(Mt_per_sito, join_by("group" == "Area")) %>% 
+
+  abund_avg <- N.estimates$estimates %>%
+    left_join(Mt_per_sito, join_by("group" == "Area")) %>%
     mutate(
       Estimate = estimate + Mt,
       LCL = lcl + Mt,
@@ -365,9 +389,9 @@ print(third_best$plot)
 # writexl::write_xlsx(abund_avg, "outputs/POPAN_abund_avg.xlsx")
 
 # averaged trends
-w4 <- dormouse.results$model.table$weight[1]  
-w5 <- dormouse.results$model.table$weight[2]  
-w3 <- dormouse.results$model.table$weight[3]  
+w4 <- dormouse.results$model.table$weight[1]
+w5 <- dormouse.results$model.table$weight[2]
+w3 <- dormouse.results$model.table$weight[3]
 
 # sum weight to normalise them (sum to 1)
 sum_weights <- w4 + w5 + w3
@@ -395,7 +419,8 @@ SE5 <- model5$results$derived$N$se
 SE3 <- model3$results$derived$N$se
 
 abund_final$SE <- sqrt(
-  W4 * (SE4^2 + (N4 - N_averaged_estimates)^2) +
+  W4 *
+    (SE4^2 + (N4 - N_averaged_estimates)^2) +
     W5 * (SE5^2 + (N5 - N_averaged_estimates)^2) +
     W3 * (SE3^2 + (N3 - N_averaged_estimates)^2)
 )
@@ -404,11 +429,14 @@ abund_final$SE <- sqrt(
 abund_final$LCL <- abund_final$Estimate - (1.96 * abund_final$SE)
 abund_final$UCL <- abund_final$Estimate + (1.96 * abund_final$SE)
 
-ggplot(abund_final, aes(x = Date, y = Estimate, group = Area, color = Area, fill = Area)) +
+ggplot(
+  abund_final,
+  aes(x = Date, y = Estimate, group = Area, color = Area, fill = Area)
+) +
   geom_ribbon(aes(ymin = LCL, ymax = UCL), color = NA, alpha = 0.2) +
   geom_line(linewidth = 0.8) +
   geom_point(size = 1.5) +
-  facet_wrap(~ Area, ncol = 3, scales = "free_y") + # scales = "fixed"
+  facet_wrap(~Area, ncol = 3, scales = "free_y") + # scales = "fixed"
   ggh4x::facetted_pos_scales(
     y = list(
       Area == "S1" ~ scale_y_continuous(limits = c(0, 20)),
@@ -440,6 +468,3 @@ ggplot(abund_final, aes(x = Date, y = Estimate, group = Area, color = Area, fill
 # saveRDS(model4, "outputs/POPAN_model4.rds")
 # saveRDS(model5, "outputs/POPAN_model5.rds")
 # saveRDS(model3, "outputs/POPAN_model3.rds")
-
-
-

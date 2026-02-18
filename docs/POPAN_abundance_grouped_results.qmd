@@ -1,0 +1,370 @@
+---
+title: "Report POPAN"
+format:
+  html:
+    toc: true
+    html-math-method: katex
+    css: styles.css
+    df-print: kable
+author: Valentina La Morgia
+last.update: system.date()
+---
+
+```{r}
+#| label: packages
+#| echo: false
+#| warning: false
+#| message: false
+
+# install.packages("R2ucare")
+library(R2ucare)
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(RMark)
+```
+
+
+```{r}
+#| label: data-preparation
+#| echo: false
+#| warning: false
+#| message: false
+
+{
+  # function for time intervals (calculates difference in months)
+  intervals_months <- function(dates) {
+    diffs <- difftime(dates[-1], dates[-length(dates)], units = "days")
+    as.numeric(diffs) / 30.44 # 1 month ≈ 30.44 days (mean Gregorian month)
+  }
+}
+
+# every study area must share the same "master" timeline
+# We need to align all areas to the same set of sampling dates.
+# If an area was not sampled on a specific date, that column should be filled
+# with zeros (or a placeholder if you distinguish "not sampled" from "zero captures").
+
+# Define the Master List of unique sampling dates across ALL areas
+master_dates <- sort(unique(as.Date(c(
+  # "2019-07-15", "2019-08-05", "2019-08-20", "2019-10-10",
+  # "2020-09-15",
+  # "2021-09-15",
+  "2022-05-05",
+  "2022-05-20",
+  "2022-06-05",
+  "2022-06-20",
+  "2022-07-05",
+  "2022-07-20",
+  "2022-08-05",
+  "2022-08-20",
+  "2022-09-05",
+  "2022-09-20",
+  "2022-10-15",
+  #"2022-10-20", "2022-11-05", "2022-11-20", "2022-12-05",
+  "2023-05-15",
+  "2023-06-15",
+  "2023-07-15",
+  "2023-08-05",
+  "2023-08-20",
+  "2023-09-05",
+  "2023-09-20", # "2023-10-10",
+  "2024-06-15",
+  "2024-07-15",
+  "2024-08-15",
+  "2024-09-15",
+  "2024-10-15"
+))))
+
+# Calculate time intervals based on the Master Timeline
+time_intervals <- intervals_months(master_dates)
+K_total <- length(master_dates)
+
+# List of study area names as they appear in your Excel sheets
+areas <- c("S1", "S2", "S3", "R1", "R2", "R3")
+# areas <- c("S3", "R3")
+
+## ---- Data preparation ----
+lista_data_ch <- vector("list", length(areas))
+{
+  for (f in areas) {
+    temp_data <- read_xlsx("../data/data_abundance_art1.xlsx", sheet = f)
+    temp_data[is.na(temp_data)] <- 0
+    # Create capture histories excluding the first column (sex)
+    ch_vec <- apply(temp_data[, -1], 1, paste0, collapse = "")
+    lista_data_ch[[f]] <- data.frame(
+      ch = as.character(ch_vec),
+      area = f,
+      freq = 1,
+      stringsAsFactors = FALSE
+    )
+  }
+  all_data_ch <- bind_rows(lista_data_ch)
+  all_data_ch$area <- as.factor(all_data_ch$area)
+  all_data_ch <- all_data_ch %>%
+    mutate(
+      valley = substr(area, 1, 1), # Estrae 'S' o 'R'
+      altitude = as.factor(substr(area, 2, 2)) # Estrae '1', '2' o '3'
+    )
+
+  # check data
+  # str(all_data_ch)
+  # summary(all_data_ch$area) # how many individuals per area
+}
+knitr::kable(as.data.frame(summary(all_data_ch$area)), 'html')
+
+dormouse.proc <- process.data(
+    all_data_ch,
+    model = "POPAN",
+    groups = c("valley", "altitude"), # area
+    time.intervals = time_intervals
+  )
+```
+
+A seguito della preparazione dei dati per le analisi POPAN, controlliamo innanzitutto il numero di individui diversi per ciascuna area di studio, che risultano decisamente più elevati per l'area R3 e, secondariamente, per l'area S3.
+
+Prima di procedere con le analisi, abbiamo poi effettuato un test per la bontà dell'adattamento dei nostri dati, per verificare eventuali problemi di overdispersione (che sono stati esclusi dato il valore di $\hat{c} < 1$):
+
+```{r}
+#| label: gof
+#| echo: false
+#| warning: false
+#| message: false
+
+# Estrai la matrice delle catture (solo 0 e 1)
+ch_matrix <- as.matrix(read.table(text = all_data_ch$ch, colClasses = "character"))
+# Trasforma in numerico
+ch_numeric <- t(apply(ch_matrix, 1, function(x) as.numeric(unlist(strsplit(x, "")))))
+
+# Esegui il test globale
+gof_result <- overall_CJS(ch_numeric, rep(1, nrow(ch_numeric)))
+print(gof_result)
+c_hat <- gof_result$chi2 / gof_result$degree_of_freedom 
+print(paste0("c_hat = ", round(c_hat,2)))
+```
+
+Dopo aver fittato i diversi modelli, abbiamo effettuato il confronto in termini di AICc:
+
+```{r}
+#| label: AICc-table
+#| echo: false
+
+mod_comparison_table <- read_excel("../outputs/POPAN_mod_comparison_table.xlsx")
+knitr::kable(mod_comparison_table, 'html', digits = 2)
+```
+
+Il modello migliore è *{Phi(Season * valley) p(time) pent(.) N(group)}*, dove group è la variabile di raggruppamento corrispondente all'area di studio. Tuttavia, notiamo che esistono altri due modelli inclusi nel model set definito da $\Delta AICc < 4$. Questi due modelli differiscono dal modello migliore per l'inclusione dell'altitudine come fattore che influenza il parametro di sopravvivenza.
+
+## Risultati sulle abbondanze
+Abbiamo quindi proseguito le analisi effettuando un *model averaging* dei tre modelli migliori, calcolando il valore del parametro derivato N dal *model averaging*: 
+
+```{r}
+#| label: abundance-study-areas
+#| echo: false
+
+POPAN_abund_avg <- read_excel("../outputs/POPAN_abund_avg.xlsx")
+# print(POPAN_abund_avg)
+knitr::kable(POPAN_abund_avg[,c("estimate", "group", "Estimate", "LCL", "UCL")], "html" , digits = 2)
+```
+
+Nella tabella, la prima colonna `estimate` riporta i valori degli animali stimati ma non visti, alla quale va aggiunta la quota di animali effettivamente catturati (riportata in `Mt`). Per la super-popolazione, il valore stimato è quindi quello riportato in `Estimate`, con i relativi intervalli di confidenza approssimati (`LCL` e `UCL`).
+
+```{r}
+#| label: comparison-abundance-areas
+#| echo: false
+
+ggplot(POPAN_abund_avg, 
+       aes(x = group, y = Estimate, colour = valley, fill = valley)) +
+  geom_errorbar(aes(ymin = LCL, ymax = UCL), width = 0.2) + # Rimosse virgolette
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(title = "Comparison Super-population (N-hat)",
+       x = "Study area",
+       y = "Super-population abundance")
+```
+
+### Nota tecnica: definizione di super-popolazione
+Nel contesto dei modelli di cattura-ricattura per popolazioni aperte (Schwarz & Arnason, 1996), la super-popolazione ($N$) è definita come il numero totale di individui unici che sono stati disponibili per la cattura nell'area di studio almeno una volta durante l'intero arco temporale dell'indagine.     
+A differenza della stima di abbondanza per singola occasione ($\hat{N}_i$), che rappresenta il numero di individui presenti in un preciso momento, la super-popolazione include:
+
+* Individui presenti all'inizio dello studio (occasione 1).
+* Tutti i nuovi recluti (nati o immigrati) che sono entrati nella popolazione tra la prima e l'ultima occasione di campionamento.    
+
+Matematicamente, la super-popolazione è la somma degli individui effettivamente catturati ($M_t$) e degli individui che si stima fossero presenti ma non sono mai stati intercettati dalle trappole ($f_0$). Rappresenta quindi una misura del "*pool*" totale di individui che quel particolare habitat è stato in grado di sostenere e ospitare durante il periodo monitorato.    
+Usare la super-popolazione ci permette di confrontare il valore biologico assoluto dei diversi siti (es. R3 vs S1) indipendentemente dalle fluttuazioni stagionali. Ad esempio, il valore di 132.2 per R3 ci dice che quel sito è passato attraverso un numero di individui totali molto superiore a S2 (7.6), confermando il ruolo dell'alta quota come serbatoio demografico primario.
+
+### Trend di abbondanza
+Il seguente grafico mostra invece l'andamento temporale delle stime nelle diverse aree di studio sulla base dei risultati del *model averaging*:
+
+```{r}
+#| label: abundance-trends-plot
+#| echo: false
+
+POPAN_abund_final <- read_excel("../outputs/POPAN_abund_final.xlsx")
+ggplot(
+  POPAN_abund_final,
+  aes(x = Date, y = Estimate, group = Area, color = Area, fill = Area)
+) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), color = NA, alpha = 0.2) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.5) +
+  facet_wrap(~Area, ncol = 3, scales = "free_y") + # scales = "fixed"
+  ggh4x::facetted_pos_scales(
+    y = list(
+      Area == "S1" ~ scale_y_continuous(limits = c(0, 20)),
+      Area == "S2" ~ scale_y_continuous(limits = c(0, 20)),
+      Area == "S3" ~ scale_y_continuous(limits = c(0, 60)),
+      Area == "R1" ~ scale_y_continuous(limits = c(0, 20)),
+      Area == "R2" ~ scale_y_continuous(limits = c(0, 20)),
+      Area == "R3" ~ scale_y_continuous(limits = c(0, 60))
+    )
+  ) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(
+    title = "Estimated Abundance of Muscardinus avellanarius",
+    subtitle = paste("Model average"),
+    x = "Survey Date",
+    y = "Estimated Population Size"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    strip.background = element_rect(fill = "grey90", color = NA),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+## Discusssione dei risultati sulle abbondanze
+Il grafico illustra le stime di abbondanza ($\hat{N}_i$) per occasione di campionamento, derivate dal processo di *multimodel inference* (media pesata dei modelli con $\Delta AICc < 4$). Questo approccio ci permette di integrare l'incertezza strutturale dei modelli, bilanciando il peso dell'altitudine e della valle sulle stime finali.
+
+### Gradiente altitudinale e Super-popolazione
+Si osserva una netta stratificazione dell'abbondanza legata alla quota, confermata dalla scala differenziata degli assi Y:
+
+* Siti ad Alta Quota (R3, S3): presentano le popolazioni più consistenti. In particolare, R3 (quota massima) mostra una super-popolazione stimata significativamente superiore agli altri siti, suggerendo che le aree sommitali rappresentino l'habitat *core* per il moscardino in questo sistema.
+* Siti a Bassa Quota (S1, S2): mantengono popolazioni numericamente ridotte. La scelta di utilizzare scale Y indipendenti consente di evidenziare la differenza rispetto ai siti ad alta quota.
+
+### Ciclicità stagionale e reclutamento
+Tutte le aree di studio mostrano un andamento a "denti di sega" tipico della specie:
+
+* Picchi post-riproduttivi: gli incrementi osservati verso la fine della stagione attiva (tardo autunno) riflettono il reclutamento dei nuovi nati (frazione stimata tramite il parametro $pent$), che gonfiano la popolazione prima del letargo.
+* Contrazione invernale: il calo sistematico tra la fine di un anno e l'inizio del successivo è indicativo della mortalità invernale o della ridotta rilevabilità all'uscita dal letargo.
+* Stabilità della sopravvivenza: la coerenza dei trend tra le valli (R ed S) suggerisce che i fattori ambientali stagionali agiscano in modo sincrono sull'intero gradiente, validando l'inserimento della variabile `Season` nel modello top per la sopravvivenza ($\Phi$).
+
+### Precisione delle stime (intervalli di confidenza)
+L'ampiezza delle bande ombreggiate (95% CI) riflette la solidità del campionamento:
+
+* Nei siti con alto numero di catture (es. R3), l'incertezza aumenta leggermente nei picchi massimi, un comportamento atteso nei modelli POPAN dove la stima degli individui "mai visti" ($f_0$) è proporzionale alla dimensione della popolazione osservata.
+* Il superamento del test di Goodness-of-Fit ($\hat{c} \approx 1$) ci rassicura sul fatto che non vi sia sovradispersione nei dati e che gli intervalli visualizzati siano statisticamente affidabili.
+
+Notiamo che S2, nonostante avesse pochissime catture reali (Mt = 4), mostra ora una stima mediata molto solida e biologicamente plausibile grazie al contributo informativo degli altri siti del set (effetto del *shrinkage* o regolarizzazione tipica dei modelli gerarchici/multi-gruppo).
+
+### Nota tecnica: condivisione dei parametri e attendibilità dei trend
+Un aspetto fondamentale da sottolineare per interpretare il grafico è che il modello POPAN non analizza ogni area in isolamento, ma come parte di un sistema integrato.
+
+* Effetto della condivisione dei parametri (*Parameter Sharing*): il *trend* comune che osserviamo è dovuto al fatto che i parametri di sopravvivenza ($\Phi$) e, in parte, di probabilità di ingresso ($pent$) sono modellati come funzioni di variabili globali o condivise (es. ~Season o ~valley). Il modello assume che i *driver* biologici (es. il calo invernale dovuto al letargo) agiscano in modo simile su tutti i siti. Questo permette di "prendere in prestito forza" (*borrowing strength*) dai siti con molti dati (R3 e S3) per informare i siti dove le catture sono scarse (S1 e S2).
+* Attendibilità nei siti con poche catture (S1, S2, R1, R2): il *trend* temporale visualizzato per i siti "poveri" di dati è largamente influenzato dalle dinamiche rilevate nei siti "ricchi". Piuttosto che un limite, questo è un punto di forza: partiamo dal presupposto biologico che i moscardini in S2 non abbiano un ciclo stagionale completamente alieno rispetto a quelli in S3, ma che rispondano agli stessi segnali ambientali (*e.g.*, temperatura).
+* Stima dell'abbondanza: anche se il *trend* è guidato dai siti principali, il modello riesce comunque a calcolare un'abbondanza assoluta specifica per aree molto povere di catture come S2. Lo fa calibrando l'altezza della curva in base al numero di individui unici catturati ($M_t$) e alla probabilità di cattura stimata.
+
+In conclusione, possiamo considerare le stime per le aree con poche catture come "stime informate dal contesto": il modello ci permette di dire: "Dati i *trend* osservati nell'intera valle e i pochi avvistamenti fatti in S2, la stima più probabile della popolazione in quel sito è di circa X individui". Senza questo approccio (ovvero analizzando S2 da solo), avremmo ottenuto stime estremamente instabili o non saremmo riusciti a far convergere il modello.
+
+## Appendice
+Grafici dei trend per i tre modelli migliori, separati
+
+```{r}
+#| label: read-models
+#| echo: false
+
+mod4 <- readRDS("../outputs/POPAN_model4.rds")
+mod5 <- readRDS("../outputs/POPAN_model5.rds")
+mod3 <- readRDS("../outputs/POPAN_model3.rds")
+```
+
+```{r}
+#| label: plots-helper-function
+#| echo: false
+
+# helper function to plot abundance results
+plot_popan_abundance <- function(
+  chosen_model,
+  model_description = "Single Best Model",
+  is_averaged = FALSE
+) {
+  abund_data <- chosen_model$results$derived$N
+
+  # Mapping Group <-> Area
+  mapping <- arrange(distinct(dormouse.proc$data[, c("group", "area")]), group)
+  area_names <- mapping$area
+  n_areas <- length(area_names)
+  n_occasions <- K_total
+
+  # Data frame of results
+  if (nrow(abund_data) != (n_areas * n_occasions)) {
+    stop(
+      "Error: The number of estimates in the model does not match Areas * Occasions."
+    )
+  }
+
+  abund_clean <- data.frame(
+    Area = rep(area_names, each = n_occasions),
+    Occasion = rep(1:n_occasions, times = n_areas),
+    Date = rep(master_dates, times = n_areas),
+    Estimate = abund_data$estimate,
+    SE = abund_data$se,
+    LCL = abund_data$lcl,
+    UCL = abund_data$ucl
+  )
+
+  # 4. Creazione del Grafico (Versione Faceted)
+  p <- ggplot(
+    abund_clean,
+    aes(x = Date, y = Estimate, group = Area, color = Area, fill = Area)
+  ) +
+    geom_ribbon(aes(ymin = LCL, ymax = UCL), color = NA, alpha = 0.2) +
+    geom_line(linewidth = 0.8) +
+    geom_point(size = 1.5) +
+    facet_wrap(~Area, ncol = 3, scales = "free_y") +
+    scale_color_brewer(palette = "Dark2") +
+    scale_fill_brewer(palette = "Dark2") +
+    labs(
+      title = "Estimated Abundance of Muscardinus avellanarius",
+      subtitle = paste("Model:", model_description),
+      x = "Survey Date",
+      y = "Estimated Population Size"
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "none",
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      strip.background = element_rect(fill = "grey90", color = NA),
+      strip.text = element_text(face = "bold")
+    )
+
+  return(list(plot = p, data = abund_clean))
+}
+```
+
+
+```{r}
+#| label: appendix-plots
+#| echo: false
+
+plot_mod4 <- plot_popan_abundance(
+  chosen_model = mod4,
+  model_description = "Best model (Phi ~ Season * valley)",
+  is_averaged = FALSE)
+print(plot_mod4$plot)
+
+plot_mod5 <- plot_popan_abundance(
+  chosen_model = mod5,
+  model_description = "Second best model (Phi ~ Season * valley + altitude)",
+  is_averaged = FALSE)
+print(plot_mod5$plot)
+
+plot_mod3 <- plot_popan_abundance(
+  chosen_model = mod3,
+  model_description = "Third best model (Phi ~ Season * altitude)",
+  is_averaged = FALSE)
+print(plot_mod3$plot)
+```
