@@ -112,7 +112,15 @@ confronto <- readRDS("outputs/loo_comparison.rds")
 confronto_df <- as.data.frame(confronto)
 confronto_df <- cbind(model = rownames(confronto_df), confronto_df)
 confronto_df$model <- rownames(confronto_df)
-confronto_df <- confronto_df[, c("model", "elpd_diff", "se_diff", "elpd_loo", "se_elpd_loo", "p_loo", "looic")]
+confronto_df <- confronto_df[, c(
+  "model",
+  "elpd_diff",
+  "se_diff",
+  "elpd_loo",
+  "se_elpd_loo",
+  "p_loo",
+  "looic"
+)]
 
 confronto_df %>%
   gt() %>%
@@ -145,6 +153,3 @@ confronto_df %>%
     locations = cells_body(rows = 1)
   ) %>%
   gtsave("outputs/loo_comparison.png")
-
-
-

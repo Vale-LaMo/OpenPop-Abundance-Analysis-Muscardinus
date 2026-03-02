@@ -87,7 +87,7 @@ areas <- c("S1", "S2", "S3", "R1", "R2", "R3")
 lista_data_ch <- vector("list", length(areas))
 {
   for (f in areas) {
-    temp_data <- read_xlsx("../data/data_abundance_art1.xlsx", sheet = f)
+    temp_data <- read_xlsx("data/data_abundance_art1.xlsx", sheet = f)
     temp_data[is.na(temp_data)] <- 0
     # Create capture histories excluding the first column (sex)
     ch_vec <- apply(temp_data[, -1], 1, paste0, collapse = "")
@@ -148,7 +148,7 @@ Dopo aver fittato i diversi modelli, abbiamo effettuato il confronto in termini 
 #| label: AICc-table
 #| echo: false
 
-mod_comparison_table <- read_excel("../outputs/POPAN_mod_comparison_table.xlsx")
+mod_comparison_table <- read_excel("outputs/POPAN_mod_comparison_table.xlsx")
 knitr::kable(mod_comparison_table, 'html', digits = 2)
 ```
 
@@ -161,7 +161,7 @@ Abbiamo quindi proseguito le analisi effettuando un *model averaging* dei tre mo
 #| label: abundance-study-areas
 #| echo: false
 
-POPAN_abund_avg <- read_excel("../outputs/POPAN_abund_avg.xlsx")
+POPAN_abund_avg <- read_excel("outputs/POPAN_abund_avg.xlsx")
 # print(POPAN_abund_avg)
 knitr::kable(POPAN_abund_avg[,c("estimate", "group", "Estimate", "LCL", "UCL")], "html" , digits = 2)
 ```
@@ -199,7 +199,7 @@ Il seguente grafico mostra invece l'andamento temporale delle stime nelle divers
 #| label: abundance-trends-plot
 #| echo: false
 
-POPAN_abund_final <- read_excel("../outputs/POPAN_abund_final.xlsx")
+POPAN_abund_final <- read_excel("outputs/POPAN_abund_final.xlsx")
 ggplot(
   POPAN_abund_final,
   aes(x = Date, y = Estimate, group = Area, color = Area, fill = Area)
@@ -236,6 +236,81 @@ ggplot(
 
 ```
 
+
+```{r}
+#| label: abundance-trends-plot-PaperFig
+#| echo: false
+
+POPAN_abund_final <- read_excel("outputs/POPAN_abund_final.xlsx")
+POPAN_abund_avg <- POPAN_abund_avg |> 
+  dplyr::rename(Estimate_SuperP = Estimate,
+    LCL_SuperP = LCL,
+    UCL_SuperP = UCL)
+POPAN_plot_data <- left_join(POPAN_abund_final, POPAN_abund_avg, join_by("Area" == "group")) |> 
+  mutate(Area_name = case_when(
+    Area == "S1" ~ "S1521",
+    Area == "S2" ~ "S1868",
+    Area == "S3" ~ "S1966",
+    Area == "R1" ~ "R1200",
+    Area == "R2" ~ "R1840",
+    Area == "R3" ~ "R1948"
+    )
+  ) |> 
+  mutate(Facet_Label = paste0(
+    "<b>", Area_name, "</b><br>",  # Nome in grassetto e a capo
+    "<span style='font-weight:normal; font-size:8pt;'>", # Inizio stile normale e più piccolo
+    "Super-N: ", round(Estimate_SuperP, 0), 
+    " (CI: ", round(LCL_SuperP, 0), "-", round(UCL_SuperP, 0), ")",
+    "</span>"
+  )) %>%
+  ungroup()
+ggplot(
+  POPAN_plot_data,
+  aes(x = Date, y = Estimate, group = Facet_Label, color = Facet_Label, fill = Area)
+) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), color = NA, alpha = 0.2) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.5) + #, colour = NA) +
+  facet_wrap(~Facet_Label, ncol = 3, scales = "free_y") + # scales = "fixed"
+  ggh4x::facetted_pos_scales(
+    y = list(
+      Facet_Label %in% grep("S1521", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("S1868", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("S1966", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("R1200", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("R1840", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("R1948", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 65))
+    )
+  ) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(
+    # title = "Estimated Abundance of Muscardinus avellanarius",
+    # subtitle = paste("Model average"),
+    x = "",
+    y = "Estimated Population Size"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    strip.background = element_rect(fill = "grey90", color = NA),
+    strip.text = element_markdown(lineheight = 1.2)
+  )
+# ggsave(
+#   filename = "figs/Abundance_Plot_POPAN.tiff", # o .png, .pdf, .eps
+#   plot = last_plot(),                          # esporta l'ultimo grafico visualizzato
+#   device = "tiff",                             # formato file
+#   compression = "lzw",
+#   width = 180,                                 # larghezza (es. 180mm è lo standard "full page width")
+#   height = 120,                                # altezza in mm
+#   units = "mm",                                # unità di misura
+#   dpi = 300,                                   # risoluzione richiesta
+#   bg = "white"                                 # sfondo bianco (evita trasparenze indesiderate)
+# )
+```
+
+
 ## Discusssione dei risultati sulle abbondanze
 Il grafico illustra le stime di abbondanza ($\hat{N}_i$) per occasione di campionamento, derivate dal processo di *multimodel inference* (media pesata dei modelli con $\Delta AICc < 4$). Questo approccio ci permette di integrare l'incertezza strutturale dei modelli, bilanciando il peso dell'altitudine e della valle sulle stime finali.
 
@@ -269,7 +344,15 @@ Un aspetto fondamentale da sottolineare per interpretare il grafico è che il mo
 
 In conclusione, possiamo considerare le stime per le aree con poche catture come "stime informate dal contesto": il modello ci permette di dire: "Dati i *trend* osservati nell'intera valle e i pochi avvistamenti fatti in S2, la stima più probabile della popolazione in quel sito è di circa X individui". Senza questo approccio (ovvero analizzando S2 da solo), avremmo ottenuto stime estremamente instabili o non saremmo riusciti a far convergere il modello.
 
+## Coefficienti dei modelli
+
+```{r}
+vincitore$results$beta
+```
+
 ## Appendice
+
+### Trend separati per i tre modelli migliori
 Grafici dei trend per i tre modelli migliori, separati
 
 ```{r}
@@ -367,4 +450,123 @@ plot_mod3 <- plot_popan_abundance(
   model_description = "Third best model (Phi ~ Season * altitude)",
   is_averaged = FALSE)
 print(plot_mod3$plot)
+```
+
+
+### Grafici dei coefficienti
+
+
+```{r}
+# Creazione del dataset basato sui "Real Parameters" di MARK
+# Nota: I valori di Lower e Upper sono presi dai tuoi output precedenti
+df_phi <- data.frame(
+  Valley = rep(c("Rhêmes", "Valsavaranche"), each = 2),
+  Season = rep(c("Active (Summer)", "Hibernation (Winter)"), 2),
+  Estimate = c(0.95, 0.53, 0.89, 0.63), # Stime puntuali
+  Lower = c(0.88, 0.28, 0.77, 0.11),    # Limite inferiore CI 95%
+  Upper = c(0.98, 0.77, 0.95, 0.96)     # Limite superiore CI 95%
+)
+
+# Ordinamento dei livelli per una visualizzazione corretta
+df_phi$Season <- factor(df_phi$Season, levels = c("Active (Summer)", "Hibernation (Winter)"))
+
+# Creazione del grafico
+ggplot(df_phi, aes(x = Season, y = Estimate, group = Valley, color = Valley)) +
+  geom_line(size = 1, position = position_dodge(0.2)) +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.1, 
+                size = 0.8, position = position_dodge(0.2)) +
+  geom_point(size = 4, position = position_dodge(0.2)) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
+  scale_color_manual(values = c("Rhêmes" = "#2c7bb6", "Valsavaranche" = "#d7191c")) +
+  labs(
+    title = "Seasonal Apparent Survival Probability (Phi)",
+    subtitle = "Comparison between Rhêmes and Valsavaranche Valleys",
+    y = "Survival Probability (phi)",
+    x = "Season",
+    caption = "Source: POPAN hierarchical model {Phi(~Season * valley)}"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 12)
+  )
+```
+
+
+
+```{r}
+library(ggplot2)
+library(patchwork)
+
+# 1. Dati POPAN (Modello: Phi ~ Season * altitude)
+df_popan <- data.frame(
+  Altitude = rep(c("Low", "Mid", "High"), each = 2),
+  Season = rep(c("Summer", "Winter"), 3),
+  Estimate = c(0.87, 0.71, 0.98, 0.25, 0.93, 0.62),
+  Lower = c(0.73, 0.06, 0.48, 0.07, 0.86, 0.29),
+  Upper = c(0.95, 0.99, 0.99, 0.61, 0.97, 0.87),
+  Model = "POPAN"
+)
+
+# 2. Dati Bayesiani (Global Survival Estimates)
+# Nota: Essendo stime globali, le ripetiamo per visualizzarle nello stesso stile
+df_stan <- data.frame(
+  Altitude = "Global System",
+  Season = rep(c("Summer", "Winter"), 1),
+  Estimate = c(0.86, 0.76),
+  Lower = c(0.76, 0.55),
+  Upper = c(0.92, 0.96),
+  Model = "Bayesian SSM"
+)
+
+# Funzione per lo stile comune
+common_theme <- list(
+  theme_minimal(),
+  theme(legend.position = "bottom", 
+        panel.grid.minor = element_blank(),
+        strip.background = element_rect(fill = "grey90", colour = NA)),
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)),
+  labs(x = "Season", y = "Survival Probability")
+)
+
+# Grafico POPAN
+p1 <- ggplot(df_popan, aes(x = factor(Season, levels=c("Summer", "Winter")), 
+                           y = Estimate, group = Altitude, color = Altitude)) +
+  geom_line(position = position_dodge(0.2), size = 1) +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.1, 
+                position = position_dodge(0.2), alpha = 0.6) +
+  geom_point(position = position_dodge(0.2), size = 3) +
+  # scale_color_manual(values = c("Low" = "#4daf4a", "Mid" = "#ff7f00", "High" = "#377eb8")) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~Model) +
+  common_theme
+
+# Grafico STAN
+p2 <- ggplot(df_stan, aes(x = factor(Season, levels=c("Summer", "Winter")), 
+                           y = Estimate, group = Altitude)) +
+  geom_line(size = 1, color = "black") +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.1, 
+                color = "black", alpha = 0.8) +
+  geom_point(size = 4, color = "black") +
+  facet_wrap(~Model) +
+  common_theme +
+  labs(y = NULL) # Rimuove l'etichetta Y per il secondo grafico
+
+# Unione dei grafici con patchwork
+p1 + p2 + plot_layout(widths = c(1.5, 1)) #+ 
+  # plot_annotation(title = "Comparison of Survival Estimates and Uncertainty",
+  #                 subtitle = "POPAN (altitudinal interaction) vs Bayesian SSM (global precision)")
+# ggsave(
+#   filename = "figs/Comparison_Survival_POPAN_BayesSSM.tiff", # o .png, .pdf, .eps
+#   plot = last_plot(),                          # esporta l'ultimo grafico visualizzato
+#   device = "tiff",                             # formato file
+#   compression = "lzw",
+#   width = 180,                                 # larghezza (es. 180mm è lo standard "full page width")
+#   height = 120,                                # altezza in mm
+#   units = "mm",                                # unità di misura
+#   dpi = 300,                                   # risoluzione richiesta
+#   bg = "white"                                 # sfondo bianco (evita trasparenze indesiderate)
+# )
 ```
