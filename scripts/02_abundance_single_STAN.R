@@ -234,3 +234,81 @@ fit$cmdstan_diagnose()
 # Optional
 # writexl::write_xlsx(summary_stats, "outputs/STAN_abund_dataS3.xlsx")
 # writexl::write_xlsx(summary_stats, "outputs/STAN_abund_dataR3.xlsx")
+
+
+## ---- plots for the paper: Figure S6 ----
+
+library(RColorBrewer)
+# Visualizza i codici hex per 8 colori della palette Dark2
+brewer.pal(n = 6, name = "Dark2")
+display.brewer.pal(n = 6, name = "Dark2")
+
+R3_STAN <- read_xlsx("outputs/STAN_abund_dataR3.xlsx") |>
+  mutate(area_name = "R1948")
+S3_STAN <- read_xlsx("outputs/STAN_abund_dataS3.xlsx") |>
+  mutate(area_name = "S1966")
+
+plot_data <- bind_rows(R3_STAN, S3_STAN) |>
+  mutate(
+    Facet_Label = paste0(
+      "<b>",
+      area_name,
+      "</b>" # Nome in grassetto e a capo
+    )
+  )
+{
+  p <- ggplot(plot_data, aes(x = date, y = mean, group = Facet_Label)) +
+    geom_ribbon(
+      aes(ymin = lower_95, ymax = upper_95, fill = Facet_Label),
+      alpha = 0.2
+    ) +
+    geom_line(aes(color = Facet_Label), linewidth = 1) +
+    geom_point(aes(color = Facet_Label), size = 1.5) +
+    scale_color_manual(values = c("#7570B3", "#E6AB02")) +
+    # scale_color_brewer(palette = "Dark2") +
+    # scale_fill_brewer(palette = "Dark2") +
+    scale_fill_manual(values = c("#7570B3", "#E6AB02")) +
+    facet_wrap(~Facet_Label, nrow = 2, scales = "free_y") + # scales = "fixed"
+    # ggh4x::facetted_pos_scales(
+    #   y = list(
+    #     Facet_Label %in%
+    #       grep(
+    #         "S1966",
+    #         unique(plot_data$Facet_Label),
+    #         value = T
+    #       ) ~ scale_y_continuous(limits = c(0, 35)),
+    #     Facet_Label %in%
+    #       grep(
+    #         "R1948",
+    #         unique(plot_data$Facet_Label),
+    #         value = T
+    #       ) ~ scale_y_continuous(limits = c(0, 85))
+    #   )
+    # ) +
+    labs(
+      x = "",
+      y = "Estimated Population Size",
+      # title = "Hierarchical Multi-Site Abundance Estimates",
+      # subtitle = "Borrowing strength across study areas via global mortality rate"
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(
+      legend.position = "none", # Facet labels already identify the area
+      axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+      strip.text = element_markdown(lineheight = 1.2),
+      strip.background = element_rect(fill = "grey90", color = NA)
+    )
+
+  print(p)
+}
+# ggsave(
+#   filename = "figs/Figure_S7.tiff", # o .png, .pdf, .eps
+#   plot = last_plot(), # esporta l'ultimo grafico visualizzato
+#   device = "tiff", # formato file
+#   compression = "lzw",
+#   width = 180, # larghezza (es. 180mm è lo standard "full page width")
+#   height = 120, # altezza in mm
+#   units = "mm", # unità di misura
+#   dpi = 300, # risoluzione richiesta
+#   bg = "white" # sfondo bianco (evita trasparenze indesiderate)
+# )

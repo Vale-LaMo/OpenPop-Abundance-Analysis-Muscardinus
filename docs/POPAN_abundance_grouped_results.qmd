@@ -501,7 +501,7 @@ library(patchwork)
 
 # 1. Dati POPAN (Modello: Phi ~ Season * altitude)
 df_popan <- data.frame(
-  Altitude = rep(c("Low", "Mid", "High"), each = 2),
+  Elevation = rep(c("Low", "Mid", "High"), each = 2),
   Season = rep(c("Summer", "Winter"), 3),
   Estimate = c(0.87, 0.71, 0.98, 0.25, 0.93, 0.62),
   Lower = c(0.73, 0.06, 0.48, 0.07, 0.86, 0.29),
@@ -512,7 +512,7 @@ df_popan <- data.frame(
 # 2. Dati Bayesiani (Global Survival Estimates)
 # Nota: Essendo stime globali, le ripetiamo per visualizzarle nello stesso stile
 df_stan <- data.frame(
-  Altitude = "Global System",
+  Elevation = "Global System",
   Season = rep(c("Summer", "Winter"), 1),
   Estimate = c(0.86, 0.76),
   Lower = c(0.76, 0.55),
@@ -532,7 +532,7 @@ common_theme <- list(
 
 # Grafico POPAN
 p1 <- ggplot(df_popan, aes(x = factor(Season, levels=c("Summer", "Winter")), 
-                           y = Estimate, group = Altitude, color = Altitude)) +
+                           y = Estimate, group = Elevation, color = Elevation)) +
   geom_line(position = position_dodge(0.2), size = 1) +
   geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.1, 
                 position = position_dodge(0.2), alpha = 0.6) +
@@ -545,7 +545,7 @@ p1 <- ggplot(df_popan, aes(x = factor(Season, levels=c("Summer", "Winter")),
 
 # Grafico STAN
 p2 <- ggplot(df_stan, aes(x = factor(Season, levels=c("Summer", "Winter")), 
-                           y = Estimate, group = Altitude)) +
+                           y = Estimate, group = Elevation)) +
   geom_line(size = 1, color = "black") +
   geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.1, 
                 color = "black", alpha = 0.8) +
