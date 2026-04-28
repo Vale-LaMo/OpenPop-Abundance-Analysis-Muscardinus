@@ -34,10 +34,6 @@
   {
     # dates and time intervals
     occasion_dates <- as.Date(c(
-      # "2019-07-15", "2019-08-05", "2019-08-20", "2019-10-10",
-      # "2020-09-15",
-      # "2021-09-15",
-      # "2022-05-05",
       "2022-05-20",
       "2022-06-05",
       "2022-06-20",
@@ -47,8 +43,7 @@
       "2022-08-20",
       "2022-09-05",
       "2022-09-20",
-      "2022-10-15", #"2022-10-20",
-      # "2022-11-05", "2022-11-20", "2022-12-05",
+      "2022-10-15", 
       "2023-05-15",
       "2023-06-15",
       "2023-07-15",
@@ -56,15 +51,13 @@
       "2023-08-20",
       "2023-09-05",
       "2023-09-20",
-      # "2023-10-10",
       "2024-06-15",
       "2024-07-15",
       "2024-08-15",
-      "2024-09-15" #, "2024-10-15"
+      "2024-09-15"
     ))
 
     time_intervals <- intervals_months(occasion_dates)
-    # names(time_intervals) <- paste(head(occasion_dates, -1), tail(occasion_dates, -1), sep = " to ")
   }
 }
 
@@ -81,9 +74,6 @@
   {
     # dates and time intervals
     occasion_dates <- as.Date(c(
-      # "2019-07-15", "2019-08-05", "2019-08-20", "2019-10-10",
-      # "2020-09-15",
-      # "2021-09-15",
       "2022-05-05",
       "2022-05-20",
       "2022-06-05",
@@ -94,8 +84,7 @@
       "2022-08-20",
       "2022-09-05",
       "2022-09-20",
-      "2022-10-15", #"2022-10-20",
-      # "2022-11-05", "2022-11-20", "2022-12-05",
+      "2022-10-15", 
       "2023-05-15",
       "2023-06-15",
       "2023-07-15",
@@ -103,15 +92,13 @@
       "2023-08-20",
       "2023-09-05",
       "2023-09-20",
-      # "2023-10-10",
       "2024-06-15",
       "2024-07-15",
       "2024-08-15",
-      "2024-09-15" #, "2024-10-15"
+      "2024-09-15"
     ))
 
     time_intervals <- intervals_months(occasion_dates)
-    # names(time_intervals) <- paste(head(occasion_dates, -1), tail(occasion_dates, -1), sep = " to ")
   }
 }
 
@@ -128,18 +115,12 @@
 
   # Define M: total number of individuals in augmented dataset
   M <- n * 3 # You can later try 60, 80, etc., to check robustness
-  # A common rule of thumb is to set M to about 2–3 times the number of observed individuals
-  # to start. You can increase this later if the posterior mass for N is too close to M.
 
   # Create M-n rows of all zeros
   data_aug <- rbind(CH, matrix(0, nrow = M - n, ncol = K))
 
   # Check dimensions
   dim(data_aug) # Should be M x K
-
-  # sex <- data$Sex  # assuming it's coded as "M" and "F"
-  # sex_num <- ifelse(sex == "M", 1, 0)
-  # sex_aug <- c(sex_num, rep(0, M - length(sex_num)))
 }
 
 {
@@ -148,8 +129,7 @@
     M = M,
     K = K,
     y = data_aug,
-    delta = time_intervals #,
-    # sex = sex_aug
+    delta = time_intervals
   )
 }
 
@@ -232,20 +212,19 @@ fit$cmdstan_diagnose()
 }
 
 # Optional
-# writexl::write_xlsx(summary_stats, "outputs/STAN_abund_dataS3.xlsx")
-# writexl::write_xlsx(summary_stats, "outputs/STAN_abund_dataR3.xlsx")
+# writexl::write_xlsx(summary_stats, "outputs/STAN/STAN_abund_dataS3.xlsx")
+# writexl::write_xlsx(summary_stats, "outputs/STAN/STAN_abund_dataR3.xlsx")
 
 
 ## ---- plots for the paper: Figure S6 ----
 
 library(RColorBrewer)
-# Visualizza i codici hex per 8 colori della palette Dark2
 brewer.pal(n = 6, name = "Dark2")
 display.brewer.pal(n = 6, name = "Dark2")
 
-R3_STAN <- read_xlsx("outputs/STAN_abund_dataR3.xlsx") |>
+R3_STAN <- read_xlsx("outputs/STAN/STAN_abund_dataR3.xlsx") |>
   mutate(area_name = "R1948")
-S3_STAN <- read_xlsx("outputs/STAN_abund_dataS3.xlsx") |>
+S3_STAN <- read_xlsx("outputs/STAN/STAN_abund_dataS3.xlsx") |>
   mutate(area_name = "S1966")
 
 plot_data <- bind_rows(R3_STAN, S3_STAN) |>
@@ -265,26 +244,8 @@ plot_data <- bind_rows(R3_STAN, S3_STAN) |>
     geom_line(aes(color = Facet_Label), linewidth = 1) +
     geom_point(aes(color = Facet_Label), size = 1.5) +
     scale_color_manual(values = c("#7570B3", "#E6AB02")) +
-    # scale_color_brewer(palette = "Dark2") +
-    # scale_fill_brewer(palette = "Dark2") +
     scale_fill_manual(values = c("#7570B3", "#E6AB02")) +
     facet_wrap(~Facet_Label, nrow = 2, scales = "free_y") + # scales = "fixed"
-    # ggh4x::facetted_pos_scales(
-    #   y = list(
-    #     Facet_Label %in%
-    #       grep(
-    #         "S1966",
-    #         unique(plot_data$Facet_Label),
-    #         value = T
-    #       ) ~ scale_y_continuous(limits = c(0, 35)),
-    #     Facet_Label %in%
-    #       grep(
-    #         "R1948",
-    #         unique(plot_data$Facet_Label),
-    #         value = T
-    #       ) ~ scale_y_continuous(limits = c(0, 85))
-    #   )
-    # ) +
     labs(
       x = "",
       y = "Estimated Population Size",

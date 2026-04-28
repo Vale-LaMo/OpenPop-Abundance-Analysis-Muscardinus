@@ -5,15 +5,16 @@ library(loo)
 library(dplyr)
 library(gt)
 
-# Crea le cartelle se non esistono
 if (!dir.exists("outputs")) {
   dir.exists("outputs")
 }
-if (!dir.exists("outputs/rds")) {
-  dir.create("outputs/rds")
+if (!dir.exists("outputs/STAN")) {
+  dir.create("outputs/STAN")
+}
+if (!dir.exists("outputs/STAN/rds")) {
+  dir.create("outputs/STAN/rds")
 }
 
-# Definisci le configurazioni delle prior da testare
 scenari <- list(
   mod_base = list(
     p_prior_mean = 0,
@@ -59,20 +60,17 @@ scenari <- list(
 
 source("scripts/03_abundance_hierachical_STAN_data_prep.R")
 
-# Carica il modello (compila una volta sola!)
 stan_file <- "models/abundance_hierarchical.stan"
 mod <- cmdstan_model(stan_file)
 
-# Ciclo di esecuzione
+# PLEASE NOTE: REFITTING THE MODELS TAKES A BIT OF TIME
 risultati_loo <- list()
 
 for (nome in names(scenari)) {
   message("\n>>> RUNNING SCENARIO: ", nome)
 
-  # Uniamo i dati originali con i parametri della prior corrente
   stan_data_current <- c(stan_data, scenari[[nome]])
 
-  # Lancio del campionamento
   fit <- mod$sample(
     data = stan_data_current,
     seed = 123,
@@ -82,20 +80,16 @@ for (nome in names(scenari)) {
     iter_sampling = 3000
   )
 
-  # SALVATAGGIO PERMANENTE (fondamentale per evitare l'errore dei file temporanei)
-  file_rds <- paste0("outputs/rds/fit_", nome, ".rds")
+  file_rds <- paste0("outputs/STAN/rds/fit_", nome, ".rds")
   fit$save_object(file = file_rds)
 
-  # Calcolo e salvataggio del LOO
   risultati_loo[[nome]] <- fit$loo()
 }
 
-# CONFRONTO FINALE
+# comparison
 confronto <- loo_compare(risultati_loo)
 print(confronto, simplify = FALSE)
-# Convertiamo il confronto in un data frame
 confronto_df <- as.data.frame(confronto)
-# Aggiungiamo i nomi dei modelli come prima colonna
 confronto_df <- cbind(model = rownames(confronto_df), confronto_df)
 # writexl::write_xlsx(confronto_df, "outputs/loo_comparison.xlsx")
 # saveRDS(confronto, "outputs/loo_comparison.rds")
@@ -107,8 +101,8 @@ print(risultati_loo$mod_regular)
 print(risultati_loo$mod_strong)
 print(risultati_loo$mod_wide)
 
-# Preparazione dati per tabella gt
-confronto <- readRDS("outputs/loo_comparison.rds")
+# data prep for gt table
+confronto <- readRDS("outputs/STAN/loo_comparison.rds")
 confronto_df <- as.data.frame(confronto)
 confronto_df <- cbind(model = rownames(confronto_df), confronto_df)
 confronto_df$model <- rownames(confronto_df)
@@ -124,11 +118,6 @@ confronto_df <- confronto_df[, c(
 
 confronto_df %>%
   gt() %>%
-  # tab_header(
-  #   title = md("**Model Comparison via LOO-CV**"),
-  #   subtitle = "Sensitivity analysis of prior distributions"
-  # ) %>%
-  # Riduzione della dimensione del font e spaziatura
   tab_options(
     table.font.size = px(10),
     data_row.padding = px(2.5),
@@ -147,9 +136,8 @@ confronto_df %>%
     p_loo = "p_LOO",
     looic = "LOOIC"
   ) %>%
-  # Evidenzia il modello vincitore
   tab_style(
     style = cell_fill(color = "lightgrey", alpha = 0.5),
     locations = cells_body(rows = 1)
   ) %>%
-  gtsave("outputs/loo_comparison.png")
+  gtsave("outputs/STAN/loo_comparison.png")

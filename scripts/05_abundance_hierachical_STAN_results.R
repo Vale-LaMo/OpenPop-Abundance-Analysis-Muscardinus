@@ -12,7 +12,7 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
 
 # load model
 {
-  fit <- readRDS("outputs/rds/fit_mod_inform.rds")
+  fit <- readRDS("outputs/STAN/rds/fit_mod_inform.rds")
   # fit <- readRDS("outputs/rds/fit_mod_wide.rds")
 }
 
@@ -67,7 +67,6 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
   print("Parameters summary")
   print(summary_diag)
 
-  # Filtriamo solo i parametri N per un Caterpillar Plot delle abbondanze medie
   n_summary <- summary_diag %>%
     filter(grepl("N\\[", variable)) %>%
     # Estraiamo gli indici per ordinare o filtrare se necessario
@@ -79,7 +78,7 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
       date = master_dates[session_num]
     )
 
-  # Plot: Caterpillar plot per area (ultime 5 sessioni come esempio)
+  # Plot: Caterpillar plot per area (last 5 sessions as an example)
   ggplot(
     n_summary, # %>% filter(session_num > (max(session_num) - 23)),
     aes(x = date, y = mean, color = area_name)
@@ -141,8 +140,8 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
       Facet_Label = paste0(
         "<b>",
         Area_name,
-        "</b><br>", # Nome in grassetto e a capo
-        "<span style='font-weight:normal; font-size:8pt;'>", # Inizio stile normale e più piccolo
+        "</b><br>", 
+        "<span style='font-weight:normal; font-size:8pt;'>", 
         "Super-N: ",
         round(mean_SuperP, 0),
         " (CrI: ",
@@ -283,31 +282,24 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
     ) -> detection_plot
   print(detection_plot)
 
-  # tabelle detection probability
+  # tables detection probability
   {
-    # 1. Estrazione dei draws per p_eff
     p_draws <- as_draws_matrix(fit$draws("p_eff"))
 
-    # 2. Definizione dei raggruppamenti (Intervalli e Aree)
-    # Usa gli stessi indici definiti per phi
     idx_summer <- c(1:11, 13:18, 19:23)
     idx_winter <- c(12, 19)
     num_areas <- length(unique(p_summary$area_num))
     num_sessions <- length(unique(p_summary$session_num))
 
-    # Funzione per mappare gli indici della matrice p_eff[area, sessione]
     get_p_draws <- function(a, s_indices) {
-      # Costruisce i nomi dei parametri p_eff[a,s] per l'area 'a' e le sessioni 's_indices'
       cols <- paste0("p_eff[", a, ",", s_indices, "]")
-      # Fa la media riga per riga (per ogni draw)
       return(rowMeans(p_draws[, cols, drop = FALSE]))
     }
 
-    # 3. Calcolo delle statistiche aggregate
     res_list <- list()
 
     for (a in 1:num_areas) {
-      # Global per Area (tutte le sessioni)
+      # Global per Area
       draws_area <- get_p_draws(a, 1:num_sessions)
 
       # Summer per Area
@@ -316,7 +308,7 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
       # Winter per Area
       draws_winter <- get_p_draws(a, idx_winter)
 
-      # Salvataggio risultati
+      # Save results
       res_list[[length(res_list) + 1]] <- data.frame(
         Area = areas[a],
         Season = "Global",
@@ -365,7 +357,7 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
   print(beta_summary)
 
   ggplot(beta_summary, aes(x = date, y = mean, fill = area_name)) +
-    geom_col() + # Le entrate sono impulsi, il grafico a barre (col) è spesso più chiaro
+    geom_col() + 
     facet_wrap(~area_name) +
     labs(
       title = "Recruitment Pulses (beta)",
@@ -376,10 +368,8 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
     theme(legend.position = "none") -> recruitment_pulses
   print(recruitment_pulses)
 
-  # calcolo del reclutamento reale per sessione, per confronto con Mark POPAN
+  # real recruitment per session, for comparison with Mark POPAN
   {
-    # 1. Estrazione dei draws per beta e N_super
-    # Assicurati che i nomi corrispondano a quelli nel tuo oggetto 'fit'
     beta_draws <- as_draws_matrix(fit$draws("beta"))
     n_super_draws <- as_draws_matrix(fit$draws("N_super"))
 
@@ -387,34 +377,25 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
     n_areas <- 6
     n_sessions <- 23
 
-    # 2. Funzione per calcolare B per tutti i draw di un'area
     get_B_uncertainty <- function(area_idx) {
-      # Matrice per salvare i risultati (iterazioni x sessioni)
       B_matrix <- matrix(NA, nrow = n_iterations, ncol = n_sessions)
 
-      # Estraiamo i draw di N_super per questa area
-      # (Verifica il nome esatto della colonna, potrebbe essere "N_super[area_idx]")
       ns_col <- paste0("N_super[", area_idx, "]")
       area_ns_draws <- n_super_draws[, ns_col]
 
       for (draw in 1:n_iterations) {
-        # Pool iniziale per questo draw
         pool_curr <- area_ns_draws[draw]
 
         for (k in 1:n_sessions) {
-          # Prendiamo il beta specifico per area, sessione e draw
           beta_col <- paste0("beta[", area_idx, ",", k, "]")
           b_val <- beta_draws[draw, beta_col]
 
-          # Calcolo del reclutamento netto (B)
           B_matrix[draw, k] <- pool_curr * b_val
 
-          # Aggiornamento del pool rimanente per la sessione successiva
           pool_curr <- pool_curr * (1 - b_val)
         }
       }
 
-      # Calcolo dei riassunti statistici per ogni sessione
       B_summary <- as.data.frame(t(apply(B_matrix, 2, function(x) {
         c(mean = mean(x), q5 = quantile(x, 0.05), q95 = quantile(x, 0.95))
       })))
@@ -424,13 +405,11 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
       return(B_summary)
     }
 
-    # 3. Esecuzione per tutte le aree
     B_final_with_error <- bind_rows(lapply(1:n_areas, get_B_uncertainty)) %>%
       mutate(area_name = areas[area_num])
 
-    # 4. Confronto finale (Media del reclutamento post-iniziale)
     B_comparison_paper <- B_final_with_error %>%
-      filter(session_num > 1) %>% # Escludiamo lo stock iniziale per confrontare con MARK
+      filter(session_num > 1) %>%
       group_by(area_name) %>%
       summarise(
         B_mean = mean(mean),
@@ -442,28 +421,20 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
     print(B_comparison_paper)
   }
 
-  # estrazione delle stime di beta
+  # extract beta
   {
-    # 1. Estrazione dei draws di beta
     beta_draws <- as_draws_matrix(fit$draws("beta"))
 
-    # 2. Parametri dello studio
     num_areas <- 6
-    # Gli intervalli totali sono solitamente N_sessioni - 1 (nel tuo caso 22)
     n_intervalli_tot <- 22
-    n_intervalli_summer <- length(idx_summer) # quanti intervalli estivi hai (es. 20)
+    n_intervalli_summer <- length(idx_summer) 
 
-    # 3. Funzione per il calcolo del beta medio
     calculate_beta_avg <- function(area_idx, interval_indices) {
-      # Identifica le colonne beta[area, sessione] corrette
       cols <- paste0("beta[", area_idx, ",", interval_indices, "]")
-      # Filtra solo le colonne esistenti nel modello
       cols <- cols[cols %in% colnames(beta_draws)]
 
-      # Calcola la media per ogni draw (riga)
       draws_avg <- rowMeans(beta_draws[, cols])
 
-      # Restituisce il summary
       return(data.frame(
         Mean = mean(draws_avg),
         Q5 = quantile(draws_avg, 0.05),
@@ -471,7 +442,7 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
       ))
     }
 
-    # 4. Esempio: Calcolo per Area R3 (R1948)
+    # Example: Area R3 (R1948)
     beta_avg_R3_summer <- calculate_beta_avg(6, idx_summer)
     beta_avg_R3_global <- calculate_beta_avg(6, 1:n_intervalli_tot)
   }
@@ -505,18 +476,16 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
     theme_minimal() -> istantaneous_seasonal_mu
   print(istantaneous_seasonal_mu)
 
-  # Estraiamo i parametri phi (che variano in base a delta e mu)
   phi_summary <- summary_diag %>%
     filter(grepl("phi", variable)) %>%
     mutate(
       interval_num = as.integer(gsub("phi\\[|\\]", "", variable)),
-      # Associamo l'intervallo alla data (inizio dell'intervallo)
       date = master_dates[interval_num]
     )
   print("Parameters summary (probs) - survival")
   print(phi_summary)
 
-  # Grafico della sopravvivenza nel tempo
+  # Survival in time
   ggplot(phi_summary, aes(x = date, y = mean)) +
     geom_line(color = "darkgreen", size = 1) +
     geom_point(color = "darkgreen") +
@@ -533,19 +502,14 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
 
   # table for summer and winter survival
   {
-    # 1. Definisci gli indici (come fatto prima)
     idx_summer <- c(1:10, 12:17, 19:22)
     idx_winter <- c(11, 18)
 
-    # 2. Estrai i draws completi per phi
-    phi_draws <- fit$draws("phi") # Formato draws_array
+    phi_draws <- fit$draws("phi")
 
-    # 3. Calcola la media stagionale PER OGNI CAMPIONE della posterior
-    # Questo preserva la corretta incertezza statistica
     summer_draws_avg <- rowMeans(as.matrix(phi_draws[,, idx_summer]))
     winter_draws_avg <- rowMeans(as.matrix(phi_draws[,, idx_winter]))
 
-    # 4. Crea la tabella riassuntiva finale
     seasonal_summary <- data.frame(
       Season = c("Summer", "Winter"),
       Mean = c(mean(summer_draws_avg), mean(winter_draws_avg)),
@@ -565,14 +529,10 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
 
   # table for global survival
   {
-    # 2. Estrai i draws completi per phi
-    phi_draws <- fit$draws("phi") # Formato draws_array
+    phi_draws <- fit$draws("phi")
 
-    # 3. Calcola la media stagionale PER OGNI CAMPIONE della posterior
-    # Questo preserva la corretta incertezza statistica
     draws_avg <- rowMeans(as.matrix(phi_draws))
 
-    # 4. Crea la tabella riassuntiva finale
     global_phi_summary <- data.frame(
       Mean = c(mean(draws_avg)),
       Q5 = c(quantile(draws_avg, 0.05)),

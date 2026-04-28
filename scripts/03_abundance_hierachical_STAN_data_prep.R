@@ -18,16 +18,8 @@
   }
 }
 
-# every study area must share the same "master" timeline
-# We need to align all areas to the same set of sampling dates.
-# If an area was not sampled on a specific date, that column should be filled
-# with zeros (or a placeholder if you distinguish "not sampled" from "zero captures").
-
 # Define the Master List of unique sampling dates across ALL areas
 master_dates <- sort(unique(as.Date(c(
-  # "2019-07-15", "2019-08-05", "2019-08-20", "2019-10-10",
-  # "2020-09-15",
-  # "2021-09-15",
   "2022-05-05",
   "2022-05-20",
   "2022-06-05",
@@ -39,14 +31,13 @@ master_dates <- sort(unique(as.Date(c(
   "2022-09-05",
   "2022-09-20",
   "2022-10-15",
-  #"2022-10-20", "2022-11-05", "2022-11-20", "2022-12-05",
   "2023-05-15",
   "2023-06-15",
   "2023-07-15",
   "2023-08-05",
   "2023-08-20",
   "2023-09-05",
-  "2023-09-20", # "2023-10-10",
+  "2023-09-20",
   "2024-06-15",
   "2024-07-15",
   "2024-08-15",
@@ -78,11 +69,6 @@ debug_seasons <- data.frame(
   Winter = is_winter
 )
 # print(debug_seasons)
-
-# -----------------------------------------------------------
-# file di riferimento "data/data_abundance.xlsx", sheet = areas[i])
-# attenzione, deve esserci una colonna per ogni occasione per tutte le aree
-# -----------------------------------------------------------
 
 # Initialize containers
 y_stacked <- matrix(nrow = 0, ncol = length(time_intervals) + 1)
