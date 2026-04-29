@@ -24,5 +24,5 @@ To reproduce the analyses, you will need:
 3. **Stan**: Required for Bayesian models via the `cmdstanr` package ([download here](https://mc-stan.org/)).
 
 ## Contact
-Valentina La Morgia - [valentina.lamorgia@isprambiente.it]
+Valentina La Morgia - [valentina.lamorgia@isprambiente.it]      
 Institute for Environmental Protection and Research (ISPRA), Italy
