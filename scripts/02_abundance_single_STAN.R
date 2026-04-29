@@ -263,7 +263,7 @@ plot_data <- bind_rows(R3_STAN, S3_STAN) |>
   print(p)
 }
 # ggsave(
-#   filename = "figs/Figure_S7.tiff", # o .png, .pdf, .eps
+#   filename = "figs/Figure_S5.tiff", # o .png, .pdf, .eps
 #   plot = last_plot(), # esporta l'ultimo grafico visualizzato
 #   device = "tiff", # formato file
 #   compression = "lzw",

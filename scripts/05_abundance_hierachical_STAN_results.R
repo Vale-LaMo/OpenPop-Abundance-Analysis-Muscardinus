@@ -233,7 +233,7 @@ source("scripts/03_abundance_hierachical_STAN_data_prep.R")
 }
 
 # Optional
-# writexl::write_xlsx(summary_stats, "outputs/STAN_hierarchical_mod_inform.xlsx")
+# writexl::write_xlsx(summary_stats, "outputs/STAN/STAN_hierarchical_mod_inform.xlsx")
 
 ##---- detection probability ----
 {

@@ -215,6 +215,7 @@ lista_data_ch <- vector("list", length(areas))
 #   mod_comparison <- collect.models()
 #   print(mod_comparison$model.table)
 # }
+
 # # save model comparison table
 # # writexl::write_xlsx(mod_comparison$model.table,
 # #                     "outputs/POPAN/POPAN_mod_comparison_table.xlsx")
@@ -318,7 +319,7 @@ print(third_best$plot)
 
 
 ##---- Model averaging ----
-# Please note: The models averaging has already been performed.
+# Please note: The model averaging has already been performed.
 # If you haven't re-run the models, you can skip this block and load the existing results to save time.
 # Re-run only if you refit the models from scratch (and on Windows laptop with Mark).
 # {
@@ -341,7 +342,7 @@ print(third_best$plot)
 #   )
 #   dormouse.results
 # }
-# # saveRDS(dormouse.results, "outputs/POPAN_dormouse_results.rds")
+# # saveRDS(dormouse.results, "outputs/POPAN/POPAN_dormouse_results.rds")
 
 dormouse.results <- readRDS("outputs/POPAN/POPAN_dormouse_results.rds")
 
@@ -383,6 +384,7 @@ dormouse.results <- readRDS("outputs/POPAN/POPAN_dormouse_results.rds")
     )
   print(abund_avg)
 }
+# writexl::write_xlsx(abund_avg, "outputs/POPAN/POPAN_abund_avg.xlsx")
 
 # averaged trends
 w4 <- dormouse.results$model.table$weight[1]
@@ -426,5 +428,63 @@ abund_final$SE <- sqrt(
 abund_final$LCL <- abund_final$Estimate - (1.96 * abund_final$SE)
 abund_final$UCL <- abund_final$Estimate + (1.96 * abund_final$SE)
 # writexl::write_xlsx(abund_final, "outputs/POPAN/POPAN_abund_final.xlsx")
+
+POPAN_abund_final <- read_excel("outputs/POPAN/POPAN_abund_final.xlsx")
+POPAN_abund_avg <- read_excel("outputs/POPAN/POPAN_abund_avg.xlsx")
+POPAN_abund_avg <- POPAN_abund_avg |> 
+  dplyr::rename(Estimate_SuperP = Estimate,
+    LCL_SuperP = LCL,
+    UCL_SuperP = UCL)
+POPAN_plot_data <- left_join(POPAN_abund_final, POPAN_abund_avg, join_by("Area" == "group")) |> 
+  mutate(Area_name = case_when(
+    Area == "S1" ~ "S1521",
+    Area == "S2" ~ "S1868",
+    Area == "S3" ~ "S1966",
+    Area == "R1" ~ "R1200",
+    Area == "R2" ~ "R1840",
+    Area == "R3" ~ "R1948"
+    )
+  ) |> 
+  mutate(Facet_Label = paste0(
+    "<b>", Area_name, "</b><br>",  # Nome in grassetto e a capo
+    "<span style='font-weight:normal; font-size:8pt;'>", # Inizio stile normale e più piccolo
+    "Super-N: ", round(Estimate_SuperP, 0), 
+    " (CI: ", round(LCL_SuperP, 0), "-", round(UCL_SuperP, 0), ")",
+    "</span>"
+  )) %>%
+  ungroup()
+ggplot(
+  POPAN_plot_data,
+  aes(x = Date, y = Estimate, group = Facet_Label, color = Facet_Label, fill = Area)
+) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), color = NA, alpha = 0.2) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.5) + #, colour = NA) +
+  facet_wrap(~Facet_Label, ncol = 3, scales = "free_y") + # scales = "fixed"
+  ggh4x::facetted_pos_scales(
+    y = list(
+      Facet_Label %in% grep("S1521", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("S1868", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("S1966", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("R1200", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("R1840", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 25)),
+      Facet_Label %in% grep("R1948", unique(POPAN_plot_data$Facet_Label), value = T) ~ scale_y_continuous(limits = c(0, 65))
+    )
+  ) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(
+    # title = "Estimated Abundance of Muscardinus avellanarius",
+    # subtitle = paste("Model average"),
+    x = "",
+    y = "Estimated Population Size"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    strip.background = element_rect(fill = "grey90", color = NA),
+    strip.text = element_markdown(lineheight = 1.2)
+  )
 
 
