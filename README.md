@@ -1,4 +1,5 @@
 # OpenPop-Abundance-Analysis-Muscardinus
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19882680.svg)](https://doi.org/10.5281/zenodo.19882680)
 
 This repository contains the data and the main R scripts used to estimate the abundance of the hazel dormouse (*Muscardinus avellanarius*) in two Alpine valleys. The analysis compares a classic Frequentist approach (**POPAN** via `RMark`) with a **Hierarchical Bayesian Model** implemented in **Stan**.
 
